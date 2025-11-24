@@ -1,19 +1,78 @@
 // ==UserScript==
-// @name         X Profile Forensics
+// @name         X Profile Forensics (v2.1 Context Aware)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.4
-// @description  Advanced forensics tool: Location, Device, Shield Status, IDs, and Account History. Supports Mobile & Desktop.
+// @version      2.1.0
+// @description  Advanced forensics. Now understands that VPN usage for Iranian users is "Normal" behavior, not "High Risk".
 // @author       A Pleasant Experience
 // @match        https://x.com/*
 // @match        https://twitter.com/*
-// @grant        none
+// @grant        GM_addStyle
 // @run-at       document-start
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // --- Configuration ---
+    // --- 1. CSS STYLES ---
+    const STYLES = `
+        :root {
+            --xf-bg: rgba(0, 0, 0, 0.85);
+            --xf-border: rgba(255, 255, 255, 0.12);
+            --xf-glass: blur(16px);
+            --xf-blue: #1d9bf0;
+            --xf-green: #00ba7c;
+            --xf-red: #f91880;
+            --xf-orange: #ffd400;
+            --xf-text: #e7e9ea;
+            --xf-text-dim: #71767b;
+        }
+        #xf-pill {
+            display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--xf-border); border-radius: 999px; padding: 4px 12px;
+            margin-right: 12px; margin-bottom: 4px; cursor: pointer; transition: all 0.2s ease;
+            font-family: TwitterChirp, -apple-system, sans-serif; font-size: 13px; user-select: none;
+        }
+        #xf-pill:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.3); }
+        .xf-dot {
+            width: 8px; height: 8px; border-radius: 50%; margin-right: 8px;
+            box-shadow: 0 0 8px currentColor; animation: xf-pulse 2s infinite;
+        }
+        @keyframes xf-pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+        #xf-card {
+            position: fixed; z-index: 10000; width: 340px;
+            background: var(--xf-bg); backdrop-filter: var(--xf-glass); -webkit-backdrop-filter: var(--xf-glass);
+            border: 1px solid var(--xf-border); border-radius: 16px; padding: 16px;
+            color: var(--xf-text); font-family: TwitterChirp, -apple-system, sans-serif;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6); opacity: 0; transform: translateY(10px) scale(0.98);
+            transition: opacity 0.2s, transform 0.2s; pointer-events: none;
+        }
+        #xf-card.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+        .xf-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--xf-border); padding-bottom: 12px; margin-bottom: 12px; }
+        .xf-title { font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--xf-text-dim); }
+        .xf-risk-badge { font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 6px; text-transform: uppercase; }
+        .xf-risk-bar-bg { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-bottom: 16px; overflow: hidden; }
+        .xf-risk-bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; }
+        .xf-status-box { padding: 10px; border-radius: 8px; font-size: 13px; line-height: 1.4; margin-bottom: 16px; border-left: 3px solid transparent; background: rgba(255,255,255,0.03); }
+        .xf-grid { display: grid; grid-template-columns: 1fr; gap: 8px; font-size: 13px; }
+        .xf-row { display: flex; justify-content: space-between; }
+        .xf-label { color: var(--xf-text-dim); }
+        .xf-value { font-weight: 600; text-align: right; }
+        .xf-mono { font-family: monospace; background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 4px; }
+        .xf-footer { margin-top: 16px; text-align: center; }
+        .xf-btn { display: inline-block; width: 100%; padding: 8px 0; background: rgba(29, 155, 240, 0.15); color: var(--xf-blue); border-radius: 8px; font-weight: bold; font-size: 13px; text-decoration: none; transition: background 0.2s; }
+        .xf-btn:hover { background: rgba(29, 155, 240, 0.25); }
+        /* Mobile */
+        #xf-mobile-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99999; display: none; align-items: flex-end; justify-content: center; backdrop-filter: blur(4px); }
+        #xf-mobile-sheet { width: 100%; max-width: 500px; background: #000; border-top: 1px solid var(--xf-border); border-radius: 20px 20px 0 0; padding: 24px; box-shadow: 0 -10px 40px rgba(0,0,0,0.5); animation: xf-slide-up 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        @keyframes xf-slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .xf-mobile-close { margin-top: 20px; padding: 12px; background: #eff3f4; color: #000; text-align: center; border-radius: 999px; font-weight: 700; font-size: 15px; }
+    `;
+
+    const styleEl = document.createElement("style");
+    styleEl.innerHTML = STYLES;
+    document.head.appendChild(styleEl);
+
+    // --- CONFIG & STATE ---
     const CONFIG = {
         bearerToken: "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
         queryId: "XRqGa7EeokUU5kppkh13EA",
@@ -34,12 +93,11 @@
         }
     };
 
-    // --- State & Regex ---
     const cache = {};
     let lastUrl = location.href;
-    let tooltipEl = null;
-    let modalEl = null;
+    let tooltipEl = null; 
     let hideTimeout = null;
+    let isInjecting = false;
 
     const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
     const SOURCE_REGEX = /^(.*?)\s+(App\s?Store|Google\s?Play|Play\s?Store|Android\s?App|iOS\s?App)$/i;
@@ -59,296 +117,247 @@
         YE: "Yemen", ZW: "Zimbabwe"
     };
 
-    // --- Helpers ---
-    function getCsrfToken() {
-        const match = document.cookie.match(/(?:^|; )ct0=([^;]+)/);
-        return match ? match[1] : "";
+    // --- UTILS ---
+    function getCsrfToken() { return document.cookie.match(/(?:^|; )ct0=([^;]+)/)?.[1] || ""; }
+    function getUsername() { return window.location.pathname.split('/')[1]; }
+    function resolveCountry(val) { return (val && val.length === 2 && COUNTRY_MAP[val]) ? COUNTRY_MAP[val] : (val || "Unknown"); }
+    function formatTime(ts) { 
+        if (!ts) return "N/A";
+        return new Date(isNaN(ts) ? ts : parseInt(ts)).toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
     }
 
-    function getUsernameFromUrl() {
-        const path = window.location.pathname.split('/');
-        if (path.length < 2) return null;
-        const user = path[1];
-        if (["home", "explore", "notifications", "messages", "i", "compose", "settings", "search"].includes(user)) return null;
-        return user;
+    // --- UI: RENDER CARD ---
+    function generateCardHTML(data) {
+        // Defaults
+        let riskColor = "var(--xf-green)";
+        let riskLabel = "SAFE";
+        let riskPercent = "5%";
+        let statusTitle = "High Confidence";
+        let statusDesc = "Connection matches organic traffic patterns.";
+        let statusBorder = "var(--xf-green)";
+        let statusBg = "rgba(0, 186, 124, 0.1)";
+
+        // Logic Variables
+        const isDeviceIran = (data.device || "").includes("Iran");
+        const isShieldActive = (data.isAccurate === false);
+        const isIranAnomaly = (data.country === "Iran" && data.isAccurate === true);
+
+        if (isShieldActive) {
+            if (isDeviceIran) {
+                // CONTEXT AWARE: Iranian user + VPN = NORMAL (Low Risk)
+                riskColor = "var(--xf-green)";
+                riskLabel = "NORMAL";
+                riskPercent = "10%";
+                statusTitle = "Shield Active (Normal)";
+                statusDesc = "User identified as Iranian using VPN/Proxy. This is standard behavior for this region.";
+                statusBorder = "var(--xf-green)";
+                statusBg = "rgba(0, 186, 124, 0.1)";
+            } else {
+                // Standard: VPN Detected = High Risk
+                riskColor = "var(--xf-red)";
+                riskLabel = "DETECTED";
+                riskPercent = "90%";
+                statusTitle = "Shield Active";
+                statusDesc = "Traffic obfuscated via Proxy/VPN or flagged for relocation.";
+                statusBorder = "var(--xf-red)";
+                statusBg = "rgba(249, 24, 128, 0.1)";
+            }
+        } else if (isIranAnomaly) {
+            // Iran + Direct = ANOMALY
+            riskColor = "var(--xf-orange)";
+            riskLabel = "ANOMALY";
+            riskPercent = "65%";
+            statusTitle = "Anomaly Detected";
+            statusDesc = "Direct access blocked in Iran. Likely White SIM, Serverless, or Phone Override.";
+            statusBorder = "var(--xf-orange)";
+            statusBg = "rgba(255, 212, 0, 0.1)";
+        }
+
+        if (data.renamed > 0) {
+            // Downgrade trust slightly if renamed
+            if (riskLabel === "SAFE") {
+                riskColor = "var(--xf-orange)";
+                riskLabel = "CAUTION";
+                riskPercent = "40%";
+            }
+            statusDesc += ` (User renamed ${data.renamed} times)`;
+        }
+
+        if (data.isIdVerified) {
+            riskPercent = "0%";
+            riskLabel = "VERIFIED ID";
+            riskColor = "var(--xf-blue)";
+        }
+
+        return `
+            <div class="xf-header">
+                <span class="xf-title">Forensics v2.1</span>
+                <span class="xf-risk-badge" style="background:${statusBorder}; color:#000;">${riskLabel}</span>
+            </div>
+            <div class="xf-risk-bar-bg">
+                <div class="xf-risk-bar-fill" style="width:${riskPercent}; background:${riskColor}"></div>
+            </div>
+            <div class="xf-status-box" style="border-left-color:${statusBorder}; background:${statusBg}">
+                <strong style="color:${statusBorder}">${statusTitle}</strong><br>
+                <span style="opacity:0.9">${statusDesc}</span>
+            </div>
+            <div class="xf-grid">
+                ${data.country !== "Unknown" ? `<div class="xf-row"><span class="xf-label">Location</span><span class="xf-value">📍 ${data.country}</span></div>` : ''}
+                <div class="xf-row"><span class="xf-label">Device</span><span class="xf-value">${data.device}</span></div>
+                <div class="xf-row"><span class="xf-label">Perm ID</span><span class="xf-value xf-mono">${data.id}</span></div>
+                <div class="xf-row"><span class="xf-label">Created</span><span class="xf-value">${data.created}</span></div>
+                ${data.renamed > 0 ? `<div class="xf-row"><span class="xf-label" style="color:var(--xf-orange)">Renamed</span><span class="xf-value" style="color:var(--xf-orange)">⚠️ ${data.renamed}x</span></div>` : ''}
+                ${data.isIdVerified ? `<div class="xf-row"><span class="xf-label">Identity</span><span class="xf-value" style="color:var(--xf-green)">Gov ID Verified</span></div>` : ''}
+            </div>
+            <div class="xf-footer">
+                <a href="${data.avatar}" target="_blank" class="xf-btn">View Original Avatar</a>
+            </div>
+        `;
     }
 
-    function resolveCountry(val) {
-        if (!val) return "";
-        return (val.length === 2 && COUNTRY_MAP[val]) ? COUNTRY_MAP[val] : val;
-    }
-
-    function formatTimestamp(ts) {
-        if (!ts) return "Unknown";
-        const date = new Date(isNaN(ts) ? ts : parseInt(ts));
-        return date.toLocaleString();
-    }
-
-    // --- Desktop Tooltip ---
-    function showDesktopTooltip(e, htmlContent) {
+    // --- UI LOGIC ---
+    function showDesktopTooltip(e, html) {
         if (hideTimeout) clearTimeout(hideTimeout);
         if (!tooltipEl) {
             tooltipEl = document.createElement("div");
-            tooltipEl.id = "xcb-tooltip";
-            tooltipEl.style.cssText = `
-                position: fixed; display: none; background: rgba(0, 0, 0, 0.95);
-                color: #e7e9ea; padding: 12px; border-radius: 8px; font-size: 13px;
-                width: 340px; z-index: 10000; pointer-events: auto;
-                box-shadow: 0 4px 12px rgba(255,255,255,0.15); border: 1px solid #333;
-                line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            `;
+            tooltipEl.id = "xf-card";
             tooltipEl.onmouseenter = () => clearTimeout(hideTimeout);
-            tooltipEl.onmouseleave = () => hideDesktopTooltip();
+            tooltipEl.onmouseleave = hideDesktopTooltip;
             document.body.appendChild(tooltipEl);
         }
-        tooltipEl.innerHTML = htmlContent;
-        tooltipEl.style.display = "block";
-        let top = e.clientY + 15;
+        tooltipEl.innerHTML = html;
+        tooltipEl.className = "visible";
+        const rect = tooltipEl.getBoundingClientRect();
+        let top = e.clientY + 20;
         let left = e.clientX;
-        if (left + 360 > window.innerWidth) left = window.innerWidth - 370;
+        if (left + rect.width > window.innerWidth) left = window.innerWidth - rect.width - 20;
+        if (top + rect.height > window.innerHeight) top = e.clientY - rect.height - 10;
         tooltipEl.style.top = top + "px";
         tooltipEl.style.left = left + "px";
     }
 
     function hideDesktopTooltip() {
-        hideTimeout = setTimeout(() => {
-            if (tooltipEl) tooltipEl.style.display = "none";
-        }, 300);
+        hideTimeout = setTimeout(() => { if (tooltipEl) tooltipEl.className = ""; }, 200);
     }
 
-    // --- Mobile Modal ---
-    function showMobileModal(htmlContent) {
-        if (!modalEl) {
-            modalEl = document.createElement("div");
-            modalEl.id = "xcb-modal-overlay";
-            modalEl.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.7); z-index: 99999; display: none;
-                justify-content: center; align-items: center;
-            `;
-            modalEl.onclick = (e) => { if (e.target === modalEl) modalEl.style.display = "none"; };
-            document.body.appendChild(modalEl);
+    function showMobileModal(html) {
+        let overlay = document.getElementById("xf-mobile-overlay");
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = "xf-mobile-overlay";
+            overlay.innerHTML = `<div id="xf-mobile-sheet"></div>`;
+            overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = "none"; };
+            document.body.appendChild(overlay);
         }
-        modalEl.innerHTML = "";
-        const box = document.createElement("div");
-        box.style.cssText = `
-            background: #15202b; color: #fff; width: 85%; max-width: 320px;
-            padding: 20px; border-radius: 16px; border: 1px solid #333;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-family: sans-serif;
-        `;
-        box.innerHTML = htmlContent;
-        const closeBtn = document.createElement("div");
-        closeBtn.innerText = "Close";
-        closeBtn.style.cssText = `
-            margin-top: 15px; padding: 10px; background: #1d9bf0;
-            text-align: center; border-radius: 8px; font-weight: bold; cursor: pointer;
-            user-select: none;
-        `;
-        closeBtn.addEventListener("click", function() { modalEl.style.display = "none"; });
-        box.appendChild(closeBtn);
-        modalEl.appendChild(box);
-        modalEl.style.display = "flex";
+        const sheet = document.getElementById("xf-mobile-sheet");
+        sheet.innerHTML = html + `<div class="xf-mobile-close" onclick="document.getElementById('xf-mobile-overlay').style.display='none'">Close</div>`;
+        overlay.style.display = "flex";
     }
 
-    // --- API & Analysis ---
-    async function fetchInfo(username) {
+    // --- DATA FETCH ---
+    async function fetchData(username) {
         if (cache[username]) return cache[username];
-
-        const host = window.location.host;
-        const url = `https://${host}/i/api/graphql/${CONFIG.queryId}/AboutAccountQuery?variables=${encodeURIComponent(JSON.stringify({ screenName: username }))}&features=${encodeURIComponent(JSON.stringify(CONFIG.features))}&fieldToggles=${encodeURIComponent(JSON.stringify({withAuxiliaryUserLabels: false}))}`;
-
+        const url = `https://${location.host}/i/api/graphql/${CONFIG.queryId}/AboutAccountQuery?variables=${encodeURIComponent(JSON.stringify({ screenName: username }))}&features=${encodeURIComponent(JSON.stringify(CONFIG.features))}&fieldToggles=${encodeURIComponent(JSON.stringify({withAuxiliaryUserLabels: false}))}`;
         try {
             const resp = await fetch(url, {
-                headers: {
-                    "authorization": `Bearer ${CONFIG.bearerToken}`,
-                    "x-csrf-token": getCsrfToken(),
-                    "content-type": "application/json"
-                }
+                headers: { "authorization": `Bearer ${CONFIG.bearerToken}`, "x-csrf-token": getCsrfToken(), "content-type": "application/json" }
             });
             const json = await resp.json();
+            const res = json?.data?.user?.result || json?.data?.user_result_by_screen_name?.result;
+            if (!res) return null;
 
-            const result = json?.data?.user?.result || json?.data?.user_result_by_screen_name?.result;
-            if (!result) return null;
+            const about = res.about_profile || res.aboutProfile || {};
+            const core = res.core || res.legacy || {};
+            const verif = res.verification_info || {};
 
-            const about = result.about_profile || result.aboutProfile || {};
-            const core = result.core || result.legacy || {};
-            const verif = result.verification_info || {};
-            const verification = result.verification || {};
-
-            // --- Extract Data ---
-            const locRaw = about.account_based_in || null;
-            const sourceRaw = about.source || null;
-            const isAccurate = about.location_accurate;
-            const restId = result.rest_id;
-            const creationDate = core.created_at;
-            const nameHistory = about.username_changes || { count: "0" };
-            const isIdVerified = verif.is_identity_verified === true;
-            const verifiedType = verification.verified_type || null;
-            const affiliate = about.affiliate_username || null;
-
-            const avatarUrl = result.avatar?.image_url || "";
-            const highResAvatar = avatarUrl.replace("_normal", "_400x400");
-
-            let displayParts = [];
-
-            const resolvedCountry = resolveCountry(locRaw);
-            if (locRaw) displayParts.push(`📍 ${resolvedCountry}`);
-
-            if (sourceRaw) {
-                const match = sourceRaw.match(SOURCE_REGEX);
-                if (match) {
-                    const region = match[1].trim();
-                    const type = match[2].toLowerCase();
-                    let device = "Smartphone";
-                    if (type.includes("app") || type.includes("ios")) device = "iPhone";
-                    if (type.includes("play") || type.includes("android")) device = "Android";
-
-                    if (IS_MOBILE) displayParts.push(`📱 ${device}`);
-                    else displayParts.push(`📱 ${device} (Region: ${region})`);
-                } else {
-                    displayParts.push(`📱 ${IS_MOBILE ? "Device" : sourceRaw}`);
-                }
+            const sourceRaw = about.source || "Unknown";
+            let deviceDisplay = sourceRaw;
+            const match = sourceRaw.match(SOURCE_REGEX);
+            if (match) {
+                const type = match[2].toLowerCase();
+                let tech = "Device";
+                if (type.includes("app") || type.includes("ios")) tech = "iPhone";
+                if (type.includes("play") || type.includes("android")) tech = "Android";
+                deviceDisplay = `${tech} (${match[1].trim()})`;
+            } else if (IS_MOBILE && sourceRaw !== "Unknown") {
+                 deviceDisplay = "Device"; 
             }
 
-            if (displayParts.length === 0) {
-                 displayParts.push("Forensics Info");
-            }
-
-            // --- Status Logic ---
-            let statusHtml = "";
-            let statusIconStr = "";
-            const isIranAnomaly = (resolvedCountry === "Iran" && isAccurate === true);
-
-            if (isAccurate === false) {
-                // Shield Active = Proxy/VPN
-                statusHtml = `<div style="background:rgba(255, 107, 107, 0.1); padding:8px; border-radius:6px; color:#ff6b6b; margin-bottom:8px; border:1px solid #ff6b6b;">🛡️ <b>Shield Active:</b><br>Connection appears obfuscated. Detected Proxy/VPN/Tor usage or recent travel activity.</div>`;
-                statusIconStr = "🛡️";
-            }
-            else if (isIranAnomaly) {
-                // Iran + Accurate = Anomaly
-                statusHtml = `<div style="background:rgba(255, 165, 0, 0.1); padding:8px; border-radius:6px; color:#ffa500; margin-bottom:8px; border:1px solid #ffa500;">⚠️ <b>Anomaly Detected:</b><br>Direct access blocked in Iran.<br>Possible parameters: Unrestricted (White) SIMs, Serverless Configs, or Local Phone Override.</div>`;
-                statusIconStr = "⚠️";
-            }
-            else {
-                // Safe = Direct
-                statusHtml = `<div style="background:rgba(0, 186, 124, 0.1); padding:8px; border-radius:6px; color:#00ba7c; margin-bottom:8px; border:1px solid #00ba7c;">✅ <b>High Confidence:</b><br>Connection appears organic. Likely methods include Unrestricted (White) SIMs, Serverless Tunneling, or Verified Local Phone Number.</div>`;
-                statusIconStr = "✅";
-            }
-
-            // 4. Build Report HTML
-            let detailHTML = `<h3 style="margin:0 0 10px 0; border-bottom:1px solid #555; padding-bottom:8px;">Forensics Report</h3>`;
-            detailHTML += statusHtml;
-
-            if (isIdVerified) {
-                detailHTML += `<div style="margin-bottom:4px;"><b>🪪 Identity:</b> <span style="color:#00ba7c">Government ID Verified</span></div>`;
-            }
-            if (verifiedType === "Government") {
-                 detailHTML += `<div style="margin-bottom:4px;"><b>🏛️ Type:</b> <span style="color:#00ba7c">Government Account</span></div>`;
-            }
-            if (affiliate) {
-                 detailHTML += `<div style="margin-bottom:4px;"><b>🔗 Affiliate:</b> @${affiliate}</div>`;
-            }
-
-            detailHTML += `<hr style="border:0;border-top:1px solid #444;margin:8px 0;">`;
-
-            if(sourceRaw) detailHTML += `<div style="margin-bottom:4px;"><b>📱 Device Source:</b><br>${sourceRaw}</div>`;
-            else if (!locRaw) detailHTML += `<div style="margin-bottom:4px;opacity:0.6;"><i>Device & Location hidden by user/org.</i></div>`;
-
-            detailHTML += `<div style="margin-bottom:4px;"><b>🆔 Permanent ID:</b> <span style="font-family:monospace;background:#000;padding:2px 4px;border-radius:3px;">${restId}</span></div>`;
-            detailHTML += `<div style="margin-bottom:8px;"><b>📅 Created:</b><br>${formatTimestamp(creationDate)}</div>`;
-
-            const renameCount = parseInt(nameHistory.count || 0);
-            if (renameCount > 0) {
-                detailHTML += `<div style="color:#ffa500; font-weight:bold; margin-top:5px;">⚠️ Renamed ${renameCount} time(s)</div>`;
-            }
-
-            detailHTML += `<div style="margin-top:12px;text-align:center;"><a href="${highResAvatar}" target="_blank" style="color:#1d9bf0;text-decoration:none;font-weight:bold;border:1px solid #1d9bf0;padding:4px 12px;border-radius:12px;">🔎 View Original Avatar</a></div>`;
-
-            cache[username] = {
-                text: displayParts.join(" | "),
-                hasData: true,
-                tooltip: detailHTML,
-                icon: statusIconStr
+            const data = {
+                country: resolveCountry(about.account_based_in),
+                device: deviceDisplay,
+                id: res.rest_id,
+                created: formatTime(core.created_at),
+                renamed: parseInt(about.username_changes?.count || 0),
+                isAccurate: about.location_accurate,
+                isIdVerified: verif.is_identity_verified === true,
+                avatar: (res.avatar?.image_url || "").replace("_normal", "_400x400")
             };
 
+            // Pill Text
+            let pillText = `📍 ${data.country}`;
+            if (data.country === "Unknown") pillText = `📱 ${data.device.split(' ')[0]}`;
+            else if (!IS_MOBILE) pillText += ` | 📱 ${data.device.split(' ')[0]}`;
+
+            // Pill Color Logic (Prioritize Iran Exception)
+            let dotColor = "var(--xf-green)";
+            const isDeviceIran = (data.device || "").includes("Iran");
+            
+            if (data.isAccurate === false) {
+                // If Shield Active + Iran Device = Green (Normal)
+                // Else = Red (Detected)
+                dotColor = isDeviceIran ? "var(--xf-green)" : "var(--xf-red)";
+            } else if (data.country === "Iran" && data.isAccurate === true) {
+                dotColor = "var(--xf-orange)"; // Anomaly
+            }
+
+            cache[username] = { data, pillText, dotColor, html: generateCardHTML(data) };
             return cache[username];
-
-        } catch (e) {
-            console.error("Fetch Error", e);
-            return null;
-        }
+        } catch (e) { console.error("X Forensics Error:", e); return null; }
     }
 
-    // --- Injection ---
-    function injectLabel(data) {
-        const headerItems = document.querySelector('[data-testid="UserProfileHeader_Items"]');
-        if (!headerItems) return;
+    // --- INJECT ---
+    async function inject(username) {
+        if (isInjecting) return;
+        const existingPill = document.getElementById("xf-pill");
+        if (existingPill && existingPill.dataset.user === username) return;
+        isInjecting = true;
+        try {
+            const header = document.querySelector('[data-testid="UserProfileHeader_Items"]');
+            if (!header) return;
+            const info = await fetchData(username);
+            if (getUsername() !== username) return;
+            if (!info) return;
+            if (existingPill) existingPill.remove();
 
-        const oldLabel = document.getElementById("x-geo-info");
-        if (oldLabel) oldLabel.remove();
+            const pill = document.createElement("div");
+            pill.id = "xf-pill";
+            pill.dataset.user = username;
+            pill.innerHTML = `<div class="xf-dot" style="color:${info.dotColor}"></div><span>${info.pillText}</span>`;
 
-        const container = document.createElement("div");
-        container.id = "x-geo-info";
-        container.style.cssText = IS_MOBILE
-            ? "display:flex; align-items:center; color:#71767b; font-size:13px; margin-right:10px; margin-bottom:4px; flex-wrap:wrap;"
-            : "display:flex; align-items:center; color:#71767b; font-size:14px; margin-right:15px;";
-
-        const textSpan = document.createElement("span");
-        textSpan.style.cssText = "color:#1d9bf0; font-weight:bold; margin-right:6px;";
-        textSpan.innerText = data.text;
-        container.appendChild(textSpan);
-
-        const statusIcon = document.createElement("span");
-        statusIcon.style.cssText = IS_MOBILE
-            ? "font-size:16px; padding:4px; cursor:pointer;"
-            : "font-size:16px; cursor:help;";
-
-        statusIcon.innerText = data.icon;
-
-        if (IS_MOBILE) {
-            statusIcon.onclick = (e) => {
-                e.stopPropagation();
-                showMobileModal(data.tooltip);
-            };
-        } else {
-            statusIcon.onmouseenter = (e) => showDesktopTooltip(e, data.tooltip);
-            statusIcon.onmouseleave = () => hideDesktopTooltip();
-        }
-
-        container.appendChild(statusIcon);
-        headerItems.insertBefore(container, headerItems.firstChild);
-    }
-
-    async function checkProfile() {
-        const username = getUsernameFromUrl();
-        if (!username) return;
-
-        const existing = document.getElementById("x-geo-info");
-        if (existing && existing.dataset.user === username) return;
-
-        const info = await fetchInfo(username);
-
-        if (getUsernameFromUrl() !== username) return;
-
-        if (info) {
-            injectLabel(info);
-            const el = document.getElementById("x-geo-info");
-            if (el) el.dataset.user = username;
-        }
+            if (IS_MOBILE) {
+                pill.onclick = (e) => { e.stopPropagation(); showMobileModal(info.html); };
+            } else {
+                pill.onmouseenter = (e) => showDesktopTooltip(e, info.html);
+                pill.onmouseleave = hideDesktopTooltip;
+            }
+            header.insertBefore(pill, header.firstChild);
+        } finally { isInjecting = false; }
     }
 
     const observer = new MutationObserver(() => {
         if (location.href !== lastUrl) {
             lastUrl = location.href;
-            const existing = document.getElementById("x-geo-info");
+            const existing = document.getElementById("xf-pill");
             if (existing) existing.remove();
-            if(!IS_MOBILE) hideDesktopTooltip();
+            if (tooltipEl) tooltipEl.className = "";
         }
-        if (document.querySelector('[data-testid="UserProfileHeader_Items"]')) {
-            checkProfile();
+        const user = getUsername();
+        if (user && document.querySelector('[data-testid="UserProfileHeader_Items"]')) {
+            inject(user);
         }
     });
-
     observer.observe(document.body, { childList: true, subtree: true });
-
 })();
