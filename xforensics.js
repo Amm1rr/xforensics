@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         X Profile Forensics (v15.0)
+// @name         X Profile Forensics (v15.1)
 // @namespace    http://tampermonkey.net/
-// @version      15.0.0
-// @description  Forensics tool. Replaced Floating Button with Native Sidebar (Desktop) and Tab Bar (Mobile) integration.
-// @author       A Pleasant Experience
+// @version      15.1.0
+// @description  Forensics tool. Fixed missing status descriptions (undefined error) in v15.
+// @author       https://x.com/yebekhe
 // @match        https://x.com/*
 // @match        https://twitter.com/*
 // @connect      raw.githubusercontent.com
@@ -22,16 +22,22 @@
 
     const TRANSLATIONS = {
         en: {
-            title: "Forensics v15.0",
+            title: "Forensics v15.1",
             menu_btn: "Forensics",
             labels: { location: "Location", device: "Device", id: "Perm ID", created: "Created", renamed: "Renamed", identity: "Identity", lang: "Language", type: "Type" },
             risk: { safe: "SAFE", detected: "DETECTED", anomaly: "ANOMALY", caution: "CAUTION", normal: "NORMAL", verified: "VERIFIED ID" },
             status: {
                 high_conf: "High Confidence",
+                high_desc: "Connection matches organic traffic patterns.",
                 shield: "Shield Active",
+                shield_desc: "Traffic obfuscated via Proxy/VPN or flagged for relocation.",
                 shield_norm: "Shield Active (Normal)",
+                shield_norm_desc: "User identified as Iranian/West Asia using VPN. Standard behavior.",
                 anomaly: "Anomaly Detected",
+                anomaly_desc: "Direct access blocked in Iran. Likely causes: White SIM/Gov Net usage.",
                 hidden_anomaly: "Hidden Identity",
+                hidden_anomaly_desc: "Farsi speaker in 'West Asia' with Direct Access. High probability of Iran-based White SIM/Gov Net usage.",
+                renamed_msg: "Renamed {n}x"
             },
             dashboard: {
                 title: "Forensics Database",
@@ -46,6 +52,11 @@
                 btn_contrib: "📤 Contribute Data",
                 btn_clear: "🗑️ Clear Cache",
                 count: "Users Stored: {n}",
+                list_header: "User List (Click to Visit)",
+                list_empty: "No users found matching filters.",
+                page_prev: "◀ Prev",
+                page_next: "Next ▶",
+                page_info: "Page {c} of {t}",
                 msg_cleared: "Database wiped successfully!",
                 msg_restored: "Restored {n} users.",
                 msg_cloud_ok: "Success! Added {n} users from GitHub.",
@@ -58,16 +69,22 @@
             lang_sel: "Lang:"
         },
         fa: {
-            title: "تحلیلگر پروفایل ۱۵.۰",
+            title: "تحلیلگر پروفایل ۱۵.۱",
             menu_btn: "جرم‌شناسی",
             labels: { location: "موقعیت", device: "دستگاه", id: "شناسه", created: "ساخت", renamed: "تغییر نام", identity: "هویت", lang: "زبان", type: "نوع" },
             risk: { safe: "امن", detected: "هشدار", anomaly: "ناهنجاری", caution: "احتیاط", normal: "طبیعی", verified: "تایید شده" },
             status: {
                 high_conf: "اطمینان بالا",
+                high_desc: "اتصال طبیعی و ارگانیک است.",
                 shield: "سپر فعال",
+                shield_desc: "استفاده از VPN/پروکسی تشخیص داده شد.",
                 shield_norm: "سپر فعال (طبیعی)",
+                shield_norm_desc: "کاربر ایران/غرب آسیا با VPN. رفتار طبیعی.",
                 anomaly: "ناهنجاری",
+                anomaly_desc: "اتصال مستقیم در ایران غیرممکن است. دلایل: سیم‌کارت سفید یا اینترنت دولتی.",
                 hidden_anomaly: "هویت پنهان",
+                hidden_anomaly_desc: "فارسی‌زبان در «غرب آسیا» با اتصال مستقیم. احتمال قوی: سیم‌کارت سفید یا اینترنت دولتی.",
+                renamed_msg: "{n} بار تغییر نام"
             },
             dashboard: {
                 title: "پایگاه داده جرم‌شناسی",
@@ -82,6 +99,11 @@
                 btn_contrib: "📤 ارسال دیتا (مشارکت)",
                 btn_clear: "🗑️ حذف دیتا",
                 count: "ذخیره شده: {n}",
+                list_header: "لیست کاربران (برای مشاهده کلیک کنید)",
+                list_empty: "کاربری با این مشخصات یافت نشد.",
+                page_prev: "◀ قبلی",
+                page_next: "بعدی ▶",
+                page_info: "صفحه {c} از {t}",
                 msg_cleared: "پایگاه داده پاک شد!",
                 msg_restored: "تعداد {n} کاربر بازیابی شد.",
                 msg_cloud_ok: "موفق! {n} کاربر از گیت‌هاب اضافه شد.",
@@ -101,10 +123,10 @@
     const STORAGE_KEY = "xf_db_v1";
     const GITHUB_REPO_ISSUES = "https://github.com/itsyebekhe/xforensics/issues/new";
     const CLOUD_DB_URL = "https://raw.githubusercontent.com/itsyebekhe/xforensics/main/database.json";
-    
+
     let db = {};
-    try { 
-        const saved = localStorage.getItem(STORAGE_KEY); 
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
             db = JSON.parse(saved);
             let cleaned = false;
@@ -130,7 +152,7 @@
 
     const STYLES = `
         :root { --xf-bg: rgba(0,0,0,0.9); --xf-border: rgba(255,255,255,0.15); --xf-blue: #1d9bf0; --xf-green: #00ba7c; --xf-red: #f91880; --xf-orange: #ffd400; --xf-purple: #794BC4; --xf-text: #e7e9ea; --xf-dim: #71767b; }
-        
+
         #xf-pill { display: inline-flex; align-items: center; background: rgba(255,255,255,0.05); border: 1px solid var(--xf-border); border-radius: 99px; padding: 4px 12px; margin-right: 12px; margin-bottom: 4px; cursor: pointer; font-family: ${FONT_STACK}; font-size: 13px; user-select: none; direction: ltr; }
         #xf-pill:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); }
         .xf-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; box-shadow: 0 0 6px currentColor; animation: xf-pulse 2s infinite; }
@@ -138,17 +160,18 @@
         .xf-mini-pill:hover { background: rgba(29,155,240,0.15); color: var(--xf-blue); border-color: var(--xf-blue); }
         .xf-mini-pill.xf-loaded { background: transparent; border: none; padding: 0 4px; font-weight: bold; }
         @keyframes xf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        
-        /* Menu Button (Desktop) */
+
+        /* Native Menu Item */
         .xf-menu-item { display: flex; align-items: center; padding: 12px; cursor: pointer; transition: 0.2s; border-radius: 99px; }
         .xf-menu-item:hover { background: rgba(239, 243, 244, 0.1); }
         .xf-menu-icon { width: 26px; height: 26px; margin-right: 20px; fill: currentColor; }
         .xf-menu-text { font-size: 20px; font-weight: 700; font-family: ${FONT_STACK}; color: var(--xf-text); }
-        
-        /* Menu Button (Mobile) */
+
+        /* Mobile Tab */
         #xf-mob-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; flex-grow: 1; height: 100%; cursor: pointer; }
         .xf-mob-icon { width: 24px; height: 24px; fill: var(--xf-text); }
 
+        /* Dashboard */
         #xf-dash-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 10001; display: none; align-items: center; justify-content: center; backdrop-filter: blur(8px); direction: ${IS_RTL?'rtl':'ltr'}; }
         #xf-dash-box { width: 90%; max-width: 400px; max-height: 85vh; background: #000; border: 1px solid var(--xf-border); border-radius: 16px; padding: 24px; font-family: ${FONT_STACK}; box-shadow: 0 20px 50px rgba(0,0,0,0.8); color: #fff; display: flex; flex-direction: column; }
         .xf-dash-title { font-size: 18px; font-weight: 800; margin-bottom: 16px; border-bottom: 1px solid var(--xf-border); padding-bottom: 10px; }
@@ -160,7 +183,7 @@
         .xf-btn-purple { background: var(--xf-purple); color: #fff; } .xf-btn-purple:hover { background: #5e35a3; }
         .xf-btn-orange { background: var(--xf-orange); color: #000; } .xf-btn-orange:hover { background: #d4b100; }
         .xf-btn-red { background: rgba(249, 24, 128, 0.2); color: var(--xf-red); border: 1px solid var(--xf-red); } .xf-btn-red:hover { background: rgba(249, 24, 128, 0.3); }
-        
+
         /* User List */
         #xf-user-list { flex: 1; overflow-y: auto; margin: 10px 0; border: 1px solid var(--xf-border); border-radius: 8px; padding: 5px; background: rgba(255,255,255,0.03); min-height: 150px; }
         .xf-user-row { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid var(--xf-border); cursor: pointer; transition: background 0.2s; font-size: 13px; }
@@ -173,6 +196,7 @@
         .xf-page-btn { cursor: pointer; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.1); user-select: none; }
         .xf-page-btn:hover { background: var(--xf-blue); color: #fff; }
 
+        /* Card */
         #xf-card { position: fixed; z-index: 10000; width: 320px; background: var(--xf-bg); backdrop-filter: blur(12px); border: 1px solid var(--xf-border); border-radius: 16px; padding: 16px; color: var(--xf-text); font-family: ${FONT_STACK}; box-shadow: 0 15px 40px rgba(0,0,0,0.7); opacity: 0; transform: translateY(10px); transition: 0.2s; pointer-events: none; direction: ${IS_RTL?'rtl':'ltr'}; text-align: ${IS_RTL?'right':'left'}; }
         #xf-card.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
         .xf-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--xf-border); padding-bottom: 10px; margin-bottom: 10px; }
@@ -208,12 +232,13 @@
     const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
     const SOURCE_REGEX = /^(.*?)\s+(App\s?Store|Google\s?Play|Play\s?Store|Android\s?App|iOS\s?App)$/i;
     const ARABIC_SCRIPT_REGEX = /[\u0600-\u06FF]/;
-    
+
     const COUNTRY_MAP={AF:"Afghanistan",AL:"Albania",DZ:"Algeria",AD:"Andorra",AO:"Angola",AR:"Argentina",AM:"Armenia",AU:"Australia",AT:"Austria",AZ:"Azerbaijan",BS:"Bahamas",BH:"Bahrain",BD:"Bangladesh",BB:"Barbados",BY:"Belarus",BE:"Belgium",BZ:"Belize",BJ:"Benin",BT:"Bhutan",BO:"Bolivia",BA:"Bosnia",BW:"Botswana",BR:"Brazil",BG:"Bulgaria",BF:"Burkina Faso",BI:"Burundi",KH:"Cambodia",CM:"Cameroon",CA:"Canada",CL:"Chile",CN:"China",CO:"Colombia",CR:"Costa Rica",HR:"Croatia",CU:"Cuba",CY:"Cyprus",CZ:"Czechia",DK:"Denmark",DO:"Dominican Republic",EC:"Ecuador",EG:"Egypt",SV:"El Salvador",EE:"Estonia",ET:"Ethiopia",FI:"Finland",FR:"France",GE:"Georgia",DE:"Germany",GH:"Ghana",GR:"Greece",GT:"Guatemala",HN:"Honduras",HU:"Hungary",IS:"Iceland",IN:"India",ID:"Indonesia",IR:"Iran",IQ:"Iraq",IE:"Ireland",IL:"Israel",IT:"Italy",JM:"Jamaica",JP:"Japan",JO:"Jordan",KZ:"Kazakhstan",KE:"Kenya",KW:"Kuwait",LV:"Latvia",LB:"Lebanon",LY:"Libya",LT:"Lithuania",LU:"Luxembourg",MG:"Madagascar",MY:"Malaysia",MV:"Maldives",MX:"Mexico",MC:"Monaco",MA:"Morocco",NP:"Nepal",NL:"Netherlands",NZ:"New Zealand",NG:"Nigeria",NO:"Norway",OM:"Oman",PK:"Pakistan",PA:"Panama",PY:"Paraguay",PE:"Peru",PH:"Philippines",PL:"Poland",PT:"Portugal",QA:"Qatar",RO:"Romania",RU:"Russia",SA:"Saudi Arabia",SN:"Senegal",RS:"Serbia",SG:"Singapore",SK:"Slovakia",SI:"Slovenia",ZA:"South Africa",KR:"South Korea",ES:"Spain",LK:"Sri Lanka",SE:"Sweden",CH:"Switzerland",TW:"Taiwan",TH:"Thailand",TN:"Tunisia",TR:"Turkey",UA:"Ukraine",AE:"United Arab Emirates",GB:"United Kingdom",US:"United States",UY:"Uruguay",VE:"Venezuela",VN:"Vietnam",YE:"Yemen",ZW:"Zimbabwe"};
 
     let lastUrl = location.href;
     let tooltipEl = null, hideTimeout = null, isInjecting = false;
-    
+
+    // Pagination State
     let currentPage = 1;
     const ITEMS_PER_PAGE = 50;
 
@@ -228,7 +253,7 @@
         return COUNTRY_MAP[code] || code;
     }
 
-    // --- MENU INJECTION (Native UI) ---
+    // --- DASHBOARD UI ---
     function injectNativeMenu() {
         if (document.getElementById('xf-menu-btn') || document.getElementById('xf-mob-tab')) return;
 
@@ -236,7 +261,6 @@
             // Desktop Sidebar
             const nav = document.querySelector('nav[aria-label="Primary"]');
             if (!nav) return;
-            
             const anchor = nav.querySelector('a[href="/home"]');
             if (!anchor) return;
 
@@ -248,22 +272,18 @@
                 <span class="xf-menu-text">${TEXT.menu_btn}</span>
             `;
             item.onclick = showDashboard;
-            
-            // Insert before "More" or at the end
+
             const more = nav.querySelector('[data-testid="AppTabBar_More_Menu"]');
             if (more) more.parentNode.insertBefore(item, more);
             else nav.appendChild(item);
-
         } else {
-            // Mobile Tab Bar
+            // Mobile Tab
             const bottomBar = document.querySelector('[data-testid="AppTabBar"]');
             if (!bottomBar) return;
-
             const tab = document.createElement('div');
             tab.id = "xf-mob-tab";
             tab.innerHTML = `<svg viewBox="0 0 24 24" class="xf-mob-icon"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"></path></svg>`;
             tab.onclick = showDashboard;
-            
             bottomBar.appendChild(tab);
         }
     }
@@ -284,12 +304,12 @@
         const listContainer = document.getElementById('xf-user-list');
         const paginationContainer = document.getElementById('xf-pagination');
         if (!listContainer) return;
-        
+
         listContainer.innerHTML = '';
         const locFilter = document.getElementById("xf-filter-loc").value.toLowerCase();
         const riskFilter = document.getElementById("xf-filter-risk").value;
 
-        const allKeys = Object.keys(db).reverse(); 
+        const allKeys = Object.keys(db).reverse();
         const filteredKeys = [];
 
         for (const user of allKeys) {
@@ -302,7 +322,7 @@
 
         const totalPages = Math.ceil(filteredKeys.length / ITEMS_PER_PAGE) || 1;
         if (currentPage > totalPages) currentPage = 1;
-        
+
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
         const endIndex = startIndex + ITEMS_PER_PAGE;
         const pageItems = filteredKeys.slice(startIndex, endIndex);
@@ -333,7 +353,7 @@
         currentPage = 1;
         const count = Object.keys(db).length;
         const overlay = document.getElementById("xf-dash-overlay");
-        
+
         overlay.innerHTML = `
             <div id="xf-dash-box">
                 <div class="xf-dash-title">${TEXT.dashboard.title}</div>
@@ -362,8 +382,9 @@
                 <div id="xf-dash-close-btn" style="margin-top:15px;text-align:center;font-size:12px;cursor:pointer;color:#71767b;">${TEXT.btn.close}</div>
             </div>
         `;
-        
+
         overlay.style.display = "flex";
+
         document.getElementById("xf-filter-loc").oninput = () => { currentPage = 1; renderUserList(db); };
         document.getElementById("xf-filter-risk").onchange = () => { currentPage = 1; renderUserList(db); };
         document.getElementById("xf-btn-backup").onclick = backupJSON;
@@ -373,6 +394,7 @@
         document.getElementById("xf-btn-csv").onclick = exportCSV;
         document.getElementById("xf-btn-clear").onclick = clearCache;
         document.getElementById("xf-dash-close-btn").onclick = () => { overlay.style.display = "none"; };
+
         renderUserList(db);
     }
 
@@ -383,11 +405,10 @@
                 try {
                     const cloudData = JSON.parse(response.responseText);
                     const beforeCount = Object.keys(db).length;
-                    db = { ...cloudData, ...db }; 
-                    saveDB();
+                    db = { ...cloudData, ...db }; saveDB();
                     const afterCount = Object.keys(db).length;
                     const added = afterCount - beforeCount;
-                    alert(TEXT.dashboard.msg_cloud_ok.replace("{l}", beforeCount).replace("{c}", added).replace("{t}", afterCount));
+                    alert(TEXT.dashboard.msg_cloud_ok.replace("{n}", added));
                     showDashboard();
                 } catch (e) { alert(TEXT.dashboard.msg_cloud_fail); }
             },
@@ -491,12 +512,12 @@
         const isFarsi = data.langCode === 'fa';
 
         if (!data.isAccurate) {
-            if (isTargetDev) { 
+            if (isTargetDev) {
                 label = TEXT.risk.normal; pct = "15%"; title = TEXT.status.shield_norm; desc = TEXT.status.shield_norm_desc;
-            } else { 
+            } else {
                 color = "var(--xf-red)"; label = TEXT.risk.detected; pct = "90%"; title = TEXT.status.shield; desc = TEXT.status.shield_desc; bg = "rgba(249, 24, 128, 0.1)";
             }
-        } else if (isTargetLoc && data.isAccurate) { 
+        } else if (isTargetLoc && data.isAccurate) {
             color = "var(--xf-orange)"; label = TEXT.risk.anomaly; pct = "70%"; bg = "rgba(255, 212, 0, 0.1)";
             if (data.countryCode === "West Asia" && isFarsi) { title = TEXT.status.hidden_anomaly; desc = TEXT.status.hidden_anomaly_desc; }
             else { title = TEXT.status.anomaly; desc = TEXT.status.anomaly_desc; }
@@ -504,8 +525,8 @@
 
         if (data.renamed > 0 && label === TEXT.risk.safe) { color = "var(--xf-orange)"; label = TEXT.risk.caution; pct = "40%"; }
         if (data.isIdVerified) { pct = "0%"; label = TEXT.risk.verified; color = "var(--xf-blue)"; }
-        
-        data.riskLabel = label;
+
+        data.riskLabel = label; // Save risk
 
         const langHtml = `
             <div class="xf-lang-row"><span>${TEXT.lang_sel}</span><span class="xf-lang-opt ${PREF_LANG==='auto'?'xf-lang-active':''}" id="xf-l-auto">Auto</span><span class="xf-lang-opt ${PREF_LANG==='en'?'xf-lang-active':''}" id="xf-l-en">En</span><span class="xf-lang-opt ${PREF_LANG==='fa'?'xf-lang-active':''}" id="xf-l-fa">Fa</span></div>
@@ -537,7 +558,6 @@
         container.querySelector('#xf-l-auto').onclick = () => setLang('auto');
         container.querySelector('#xf-l-en').onclick = () => setLang('en');
         container.querySelector('#xf-l-fa').onclick = () => setLang('fa');
-        
         const retryBtn = container.querySelector('#xf-retry-btn');
         if(retryBtn) {
             retryBtn.onclick = async (e) => {
@@ -594,7 +614,7 @@
             if (match) {
                 const region = match[1].trim(); const type = match[2].toLowerCase(); let tech = TEXT.labels.device;
                 if (type.includes("app") || type.includes("ios")) tech = "iPhone"; if (type.includes("play") || type.includes("android")) tech = "Android";
-                devShort = tech; devFull = `${tech} (${region})`; 
+                devShort = tech; devFull = `${tech} (${region})`;
             } else if (IS_MOBILE && sourceRaw !== TEXT.values.unknown) devShort = TEXT.labels.device;
 
             const rawCountry = about.account_based_in;
@@ -667,7 +687,7 @@
         if (user && document.querySelector('[data-testid="UserProfileHeader_Items"]') && !document.getElementById("xf-pill")) inject(user);
         injectLists();
         injectNativeMenu();
-    }, 1000); // 1s Poll Backup
+    }, 1000);
 
     setTimeout(initDashboard, 2000);
 
