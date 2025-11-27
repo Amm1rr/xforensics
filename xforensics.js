@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         X Profile Forensics (v15.4)
+// @name         X Profile Forensics (v15.4.1)
 // @namespace    http://tampermonkey.net/
-// @version      15.4.0
+// @version      15.4.1
 // @description  Forensics tool. Restored Mobile Floating Button (FAB) positioned above the bottom tab bar.
 // @author       https://x.com/yebekhe
 // @match        https://x.com/*
@@ -34,7 +34,7 @@
                 shield_norm: "Shield Active (Normal)",
                 shield_norm_desc: "User identified as Iranian/West Asia using VPN. Standard behavior.",
                 anomaly: "Anomaly Detected",
-                anomaly_desc: "Direct access blocked in Iran. Likely causes: White SIM, Serverless config, or +98 Phone.",
+                anomaly_desc: "Direct access blocked in Iran. Likely causes: White SIM, Serverless config.",
                 hidden_anomaly: "Hidden Identity",
                 hidden_anomaly_desc: "Farsi speaker in 'West Asia' with Direct Access. High probability of Iran-based White SIM/Gov Net usage.",
                 renamed_msg: "Renamed {n}x"
@@ -81,7 +81,7 @@
                 shield_norm: "سپر فعال (طبیعی)",
                 shield_norm_desc: "کاربر ایران/غرب آسیا با VPN. رفتار طبیعی.",
                 anomaly: "ناهنجاری",
-                anomaly_desc: "اتصال مستقیم در ایران غیرممکن است. دلایل: سیم‌کارت سفید، تانلینگ یا شماره ۹۸+.",
+                anomaly_desc: "اتصال مستقیم در ایران غیرممکن است. دلایل: سیم‌کارت سفید، کانفیگ سرورلس.",
                 hidden_anomaly: "هویت پنهان",
                 hidden_anomaly_desc: "فارسی‌زبان در «غرب آسیا» با اتصال مستقیم. احتمال قوی: سیم‌کارت سفید یا اینترنت دولتی.",
                 renamed_msg: "{n} بار تغییر نام"
