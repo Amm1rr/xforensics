@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         X Profile Forensics (v19.1)
+// @name         X Profile Forensics (v19.2)
 // @namespace    http://tampermonkey.net/
-// @version      19.1.0
-// @description  Forensics tool. Added checkbox selectors to Batch Mode so users can choose exactly which fields to export.
+// @version      19.2.0
+// @description  Forensics tool. Added "ID Lookup" tool to find profiles by numeric ID.
 // @author       https://x.com/yebekhe
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -22,7 +22,7 @@
 
     const TRANSLATIONS = {
         en: {
-            title: "Forensics v19.1",
+            title: "Forensics v19.2",
             menu_btn: "Forensics",
             labels: { location: "Location", device: "Device", id: "Perm ID", created: "Created", renamed: "Renamed", identity: "Identity", lang: "Language", type: "Type" },
             risk: { safe: "SAFE", detected: "DETECTED", anomaly: "ANOMALY", caution: "CAUTION", normal: "NORMAL", verified: "VERIFIED ID" },
@@ -54,6 +54,7 @@
                 btn_clear: "🗑️ Clear Cache",
                 btn_block: "🚫 Mass Block Listed",
                 btn_stop: "🛑 STOP Process",
+                btn_lookup: "🆔 ID Lookup",
                 count: "Users Stored: {n}",
                 list_header: "User List (Click to Visit)",
                 list_empty: "No users found matching filters.",
@@ -72,6 +73,13 @@
                 msg_block_stop: "Process stopped by user.",
                 msg_no_targets: "All users in this filter are already blocked!",
                 contrib_info: "1. A CLEAN file (contribution.json) has been downloaded (Block status removed).\n2. A GitHub tab will open.\n3. DRAG & DROP the file into the comment box to upload it."
+            },
+            lookup: {
+                title: "Find User by ID",
+                desc: "Enter a Numeric ID (e.g. 44196397). Twitter will redirect you to the current profile.",
+                input_ph: "Numeric ID...",
+                btn_go: "Visit Profile",
+                btn_back: "Back to DB"
             },
             batch: {
                 title: "Batch Processing",
@@ -111,7 +119,7 @@
             lang_sel: "Lang:"
         },
         fa: {
-            title: "تحلیلگر پروفایل ۱۹.۱",
+            title: "تحلیلگر پروفایل ۱۹.۲",
             menu_btn: "جرم‌شناسی",
             labels: { location: "موقعیت", device: "دستگاه", id: "شناسه", created: "ساخت", renamed: "تغییر نام", identity: "هویت", lang: "زبان", type: "نوع" },
             risk: { safe: "امن", detected: "هشدار", anomaly: "ناهنجاری", caution: "احتیاط", normal: "طبیعی", verified: "تایید شده" },
@@ -143,6 +151,7 @@
                 btn_clear: "🗑️ حذف دیتا",
                 btn_block: "🚫 مسدودسازی لیست",
                 btn_stop: "🛑 توقف عملیات",
+                btn_lookup: "🆔 یابنده ID",
                 count: "ذخیره شده: {n}",
                 list_header: "لیست کاربران (برای مشاهده کلیک کنید)",
                 list_empty: "کاربری با این مشخصات یافت نشد.",
@@ -161,6 +170,13 @@
                 msg_block_stop: "عملیات توسط کاربر متوقف شد.",
                 msg_no_targets: "تمام کاربران این لیست قبلا بلاک شده‌اند!",
                 contrib_info: "۱. یک فایل پاکسازی شده (contribution.json) دانلود شد (وضعیت بلاک حذف شد).\n۲. صفحه گیت‌هاب باز می‌شود.\n۳. فایل دانلود شده را داخل کادر متن بکشید و رها کنید (Drag & Drop)."
+            },
+            lookup: {
+                title: "جستجو با شناسه عددی",
+                desc: "شناسه عددی (مانند 44196397) را وارد کنید تا به پروفایل فعلی هدایت شوید.",
+                input_ph: "شناسه عددی...",
+                btn_go: "مشاهده پروفایل",
+                btn_back: "بازگشت"
             },
             batch: {
                 title: "پردازش دسته‌ای (Batch Processing)",
@@ -219,7 +235,6 @@
     const BATCH_DELAY = 1000;
     const RATE_LIMIT_PAUSE = 60;
 
-    // Field Definitions for Batch Selector
     const BATCH_FIELDS = [
         { id: 'username', labelKey: 'col_username' },
         { id: 'name', labelKey: 'col_name' },
@@ -250,7 +265,6 @@
         total: 0,
         okCount: 0,
         errCount: 0,
-        // Default all fields to true initially
         enabledFields: new Set(BATCH_FIELDS.map(f => f.id))
     };
 
@@ -363,7 +377,6 @@
         .xf-osint-icon { font-size: 16px; cursor: pointer; opacity: 0.7; transition: 0.2s; text-decoration: none; }
         .xf-osint-icon:hover { opacity: 1; transform: scale(1.1); }
 
-        /* Batch Checkboxes */
         .xf-batch-options { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 10px 0; max-height: 100px; overflow-y: auto; background: rgba(255,255,255,0.05); padding: 5px; border-radius: 8px; }
         .xf-batch-opt { display: flex; align-items: center; font-size: 11px; color: var(--xf-dim); cursor: pointer; }
         .xf-batch-opt input { margin-right: 5px; cursor: pointer; accent-color: var(--xf-blue); }
@@ -475,11 +488,9 @@
         const output = {};
         const isDeleted = res.is_deleted === true;
 
-        // --- Helper to check if field is enabled ---
         const isFieldEnabled = (id) => batchState.enabledFields.has(id);
 
         if (isDeleted) {
-            // Handle Deleted/Suspended User
             if(isFieldEnabled('username')) output[TEXT.batch.col_username] = res.core.screen_name;
             if(isFieldEnabled('name')) output[TEXT.batch.col_name] = 'SUSPENDED/DELETED';
             if(isFieldEnabled('id_changes')) output[TEXT.batch.col_id_changes] = 0;
@@ -501,7 +512,6 @@
         const about = res.about_profile || res.aboutProfile || {};
         const verif = res.verification_info || {};
 
-        // --- Calculate Values ---
         const username = core.screen_name || 'N/A';
         const name = core.name || 'N/A';
         const rest_id = res.rest_id || 'N/A';
@@ -518,7 +528,7 @@
         const accountStatus = 1;
 
         const sourceRaw = about.source || TEXT.values.unknown;
-        let deviceType = 2; // Default Web/Other
+        let deviceType = 2;
         const match = sourceRaw.match(SOURCE_REGEX);
         if (match) {
             const type = match[2].toLowerCase();
@@ -541,7 +551,6 @@
         const isPersianSpeaker = ARABIC_SCRIPT_REGEX.test(name) || ARABIC_SCRIPT_REGEX.test(bio);
         const langCode = isPersianSpeaker ? 'fa' : 'other';
 
-        // --- Construct Output based on Selection ---
         if(isFieldEnabled('username')) output[TEXT.batch.col_username] = username;
         if(isFieldEnabled('name')) output[TEXT.batch.col_name] = name;
         if(isFieldEnabled('id_changes')) output[TEXT.batch.col_id_changes] = renameCount;
@@ -649,7 +658,6 @@
                     batchState.okCount++;
                     statusChar = '✅';
 
-                    // Display result with name if selected, otherwise just username
                     const displayLabel = result[TEXT.batch.col_name] || username;
                     if (resultsListEl) {
                          resultsListEl.innerHTML += `<div>[${index + 1}/${batchState.total}] ${statusChar} @${username} (${displayLabel})</div>`;
@@ -661,7 +669,6 @@
             } catch (e) {
                 console.error(`Error fetching @${username}:`, e);
                 batchState.errCount++;
-                // Create minimal error object based on selected fields
                 const errorObj = {};
                 if(batchState.enabledFields.has('username')) errorObj[TEXT.batch.col_username] = username;
                 if(batchState.enabledFields.has('name')) errorObj[TEXT.batch.col_name] = 'API ERROR';
@@ -768,7 +775,6 @@
 
         batchOverlayEl.style.display = "flex";
 
-        // Bind Checkbox Events
         const checks = batchOverlayEl.querySelectorAll('.xf-batch-options input[type="checkbox"]');
         checks.forEach(chk => {
             chk.onchange = (e) => {
@@ -782,7 +788,7 @@
         document.getElementById('xf-batch-export').onclick = exportBatchJson;
         document.getElementById('xf-batch-close').onclick = () => {
             if (batchState.isRunning) {
-                batchState.isAborted = true; // Signal abortion
+                batchState.isAborted = true;
             }
             batchOverlayEl.style.display = "none";
         };
@@ -856,6 +862,30 @@
         input.type = "file"; input.id = "xf-restore-input"; input.style.display = "none"; input.accept = ".json";
         input.onchange = handleRestore;
         document.body.appendChild(input);
+    }
+
+    // New Function for ID Lookup Page
+    function showLookupPage() {
+        const box = document.getElementById('xf-dash-box');
+        if(!box) return;
+
+        box.innerHTML = `
+            <div class="xf-dash-title">${TEXT.lookup.title}</div>
+            <div style="padding: 20px; text-align: center; flex:1; display:flex; flex-direction:column; justify-content:center;">
+                <p style="color: #71767b; font-size: 12px; margin-bottom: 10px;">${TEXT.lookup.desc}</p>
+                <input type="text" id="xf-lookup-input" class="xf-input" placeholder="${TEXT.lookup.input_ph}" style="text-align:center; font-family:monospace;">
+                <button id="xf-lookup-go" class="xf-dash-btn xf-btn-blue" style="width:100%; margin-top:10px;">${TEXT.lookup.btn_go}</button>
+                <button id="xf-lookup-back" class="xf-dash-btn xf-btn-red" style="width:100%; margin-top:10px; background:transparent; border:1px solid #71767b; color:#71767b;">${TEXT.lookup.btn_back}</button>
+            </div>
+        `;
+
+        document.getElementById('xf-lookup-go').onclick = () => {
+            const val = document.getElementById('xf-lookup-input').value.trim();
+            if(!/^\d+$/.test(val)) return alert("Please enter numbers only.");
+            window.open(`https://x.com/i/user/${val}`, '_blank');
+        };
+
+        document.getElementById('xf-lookup-back').onclick = showDashboard;
     }
 
     function getFilteredUsers() {
@@ -954,8 +984,12 @@
                 <div id="xf-pagination" class="xf-pagination"></div>
 
                 <div class="xf-btn-row">
-                    <button id="xf-btn-batch" class="xf-dash-btn xf-btn-blue">${TEXT.batch.btn_open}</button>
+                    <button id="xf-btn-batch" class="xf-dash-btn xf-btn-blue" style="flex:1.5">${TEXT.batch.btn_open}</button>
+                    <button id="xf-btn-lookup" class="xf-dash-btn xf-btn-blue" style="flex:1">${TEXT.dashboard.btn_lookup}</button>
+                </div>
+                <div class="xf-btn-row">
                     <button id="xf-btn-cloud" class="xf-dash-btn xf-btn-purple">${TEXT.dashboard.btn_cloud}</button>
+                    <button id="xf-btn-contrib" class="xf-dash-btn xf-btn-orange" style="color:#000;">${TEXT.dashboard.btn_contrib}</button>
                 </div>
                 <div class="xf-btn-row">
                     <button id="xf-btn-backup" class="xf-dash-btn xf-btn-blue">${TEXT.dashboard.btn_backup}</button>
@@ -963,9 +997,6 @@
                 </div>
                 <div class="xf-btn-row">
                     <button id="xf-btn-csv" class="xf-dash-btn xf-btn-blue" style="background:transparent;border:1px solid var(--xf-blue);color:var(--xf-blue)">${TEXT.dashboard.btn_export}</button>
-                    <button id="xf-btn-contrib" class="xf-dash-btn xf-btn-orange" style="color:#000;">${TEXT.dashboard.btn_contrib}</button>
-                </div>
-                <div class="xf-btn-row">
                     <button id="xf-btn-clear" class="xf-dash-btn xf-btn-red" style="flex: 0.5;">${TEXT.dashboard.btn_clear}</button>
                     <button id="xf-btn-block" class="xf-dash-btn xf-btn-red" style="border:1px solid #fff;background:#420000; flex: 1.5;">${TEXT.dashboard.btn_block}</button>
                 </div>
@@ -987,6 +1018,7 @@
         document.getElementById("xf-btn-clear").onclick = clearCache;
         document.getElementById("xf-btn-block").onclick = handleMassBlock;
         document.getElementById("xf-btn-batch").onclick = showBatchModal;
+        document.getElementById("xf-btn-lookup").onclick = showLookupPage;
         document.getElementById("xf-dash-close-btn").onclick = () => { overlay.style.display = "none"; };
 
         document.getElementById('xf-dash-l-auto').onclick = () => setLang('auto');
@@ -1168,7 +1200,7 @@
 
                         let color = "var(--xf-green)";
                         const isTargetLoc = (data.countryCode === "Iran" || data.countryCode === "West Asia" || data.countryCode === "غرب آسیا");
-                        const isTargetDev = (data.deviceFull.includes("Android") || data.deviceFull.includes("iPhone")); // Generic logic for safe apps
+                        const isTargetDev = (data.deviceFull.includes("Android") || data.deviceFull.includes("iPhone"));
 
                         if (!data.isAccurate) {
                             color = "var(--xf-red)";
