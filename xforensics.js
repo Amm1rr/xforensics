@@ -72,6 +72,32 @@
                 msg_no_targets: "All users in this filter are already blocked!",
                 contrib_info: "1. A CLEAN file (contribution.json) has been downloaded (Block status removed).\n2. A GitHub tab will open.\n3. DRAG & DROP the file into the comment box to upload it."
             },
+            batch: {
+                title: "Batch Processing",
+                btn_open: "⚙️ Batch",
+                input_placeholder: "One username per line (no @ symbol)",
+                btn_start: "Start Processing",
+                btn_export_json: "💾 Export JSON",
+                status_idle: "Idle",
+                status_running: "Running...",
+                status_paused: "Paused (Rate Limit)",
+                status_stopped: "Stopped",
+                status_done: "Finished",
+                progress: "Progress: {c} of {t} | OK: {ok} | Error: {err}",
+                rate_limit_msg: "API Rate Limit hit. Pausing for 1 minute...",
+                rate_limit_wait: "Pausing: {s} seconds remaining...",
+                export_filename: "batch_export",
+                col_username: "Username",
+                col_name: "Display Name",
+                col_id_changes: "ID Change Count",
+                col_last_change: "Last ID Change (UTC)",
+                col_created: "Created Date (UTC)",
+                col_deleted: "Account Status (0: Deleted/Suspended, 1: Active)",
+                col_device: "Device Type (0: Android, 1: iPhone, 2: Web/Other)",
+                col_location_status: "Location Status (0: None, 1: Accurate/i, 2: VPN/Proxy)",
+                col_gender: "Gender (2: Unknown)",
+                col_numeric_id: "Numeric ID",
+            },
             btn: { view_avatar: "View Avatar", close: "Close", retry: "Refresh Data" },
             values: { gov: "Government", unknown: "Unknown", west_asia: "West Asia", fa_script: "Farsi/Arabic" },
             notes_placeholder: "Add personal notes...",
@@ -129,6 +155,32 @@
                 msg_no_targets: "تمام کاربران این لیست قبلا بلاک شده‌اند!",
                 contrib_info: "۱. یک فایل پاکسازی شده (contribution.json) دانلود شد (وضعیت بلاک حذف شد).\n۲. صفحه گیت‌هاب باز می‌شود.\n۳. فایل دانلود شده را داخل کادر متن بکشید و رها کنید (Drag & Drop)."
             },
+            batch: {
+                title: "پردازش دسته‌ای (Batch Processing)",
+                btn_open: "⚙️ پردازش",
+                input_placeholder: "هر خط یک نام کاربری (@ بدون علامت)",
+                btn_start: "شروع پردازش",
+                btn_export_json: "💾 خروجی JSON",
+                status_idle: "آماده",
+                status_running: "در حال اجرا...",
+                status_paused: "متوقف شده (Rate Limit)",
+                status_stopped: "متوقف شد",
+                status_done: "پایان یافت",
+                progress: "پیشرفت: {c} از {t} | موفق: {ok} | خطا: {err}",
+                rate_limit_msg: "محدودیت نرخ API فعال شد. ۱ دقیقه صبر می‌کند...",
+                rate_limit_wait: "توقف: {s} ثانیه باقی مانده...",
+                export_filename: "خروجی-دسته-ای",
+                col_username: "نام کاربری",
+                col_name: "نام نمایشی",
+                col_id_changes: "تعداد تغییر نام",
+                col_last_change: "آخرین تغییر نام (میلادی)",
+                col_created: "تاریخ ثبت نام (میلادی)",
+                col_deleted: "وضعیت اکانت (0: حذف/تعلیق, 1: فعال)",
+                col_device: "نوع دستگاه (0: اندروید, 1: آیفون, 2: وب/دیگر)",
+                col_location_status: "وضعیت مکان (0: بدون علامت, 1: دقیق, 2: VPN/پروکسی)",
+                col_gender: "جنسیت (2: نامشخص)",
+                col_numeric_id: "آی‌دی عددی",
+            },
             btn: { view_avatar: "آواتار اصلی", close: "بستن", retry: "بروزرسانی" },
             values: { gov: "دولتی", unknown: "نامشخص", west_asia: "غرب آسیا", fa_script: "فارسی/عربی" },
             notes_placeholder: "یادداشت شخصی بنویسید...",
@@ -139,24 +191,43 @@
 
     const TEXT = TRANSLATIONS[ACTIVE_LANG] || TRANSLATIONS['en'];
 
-    // --- 2. STORAGE ---
+    // --- 2. STORAGE & GLOBALS ---
     const STORAGE_KEY = "xf_db_v1";
     const GITHUB_REPO_ISSUES = "https://github.com/itsyebekhe/xforensics/issues/new";
     const CLOUD_DB_URL = "https://raw.githubusercontent.com/itsyebekhe/xforensics/main/database.json";
 
     let saveTimeout;
     let db = {};
-    
+
     // Globals for Blocking
     let isBlockingProcess = false;
     let abortBlock = false;
+
+    // Globals for Batch Processing
+    const BATCH_DELAY = 1000; // 1 second delay
+    const RATE_LIMIT_PAUSE = 60; // 60 seconds pause
+
+    let batchOverlayEl = null;
+
+    let batchState = {
+        isRunning: false,
+        isAborted: false,
+        isPaused: false,
+        currentWaitTime: 0,
+        list: [],
+        index: 0,
+        results: [],
+        total: 0,
+        okCount: 0,
+        errCount: 0,
+    };
 
     function saveDB() {
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
             const keys = Object.keys(db);
-            if (keys.length > 20000) { 
-                keys.slice(0, 2000).forEach(k => delete db[k]); 
+            if (keys.length > 20000) {
+                keys.slice(0, 2000).forEach(k => delete db[k]);
             }
             localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
         }, 2000);
@@ -167,11 +238,11 @@
         if (saved) {
             db = JSON.parse(saved);
             let cleaned = false;
-            Object.keys(db).forEach(k => { 
-                if(db[k].html) { 
-                    delete db[k].html; 
-                    cleaned = true; 
-                } 
+            Object.keys(db).forEach(k => {
+                if(db[k].html) {
+                    delete db[k].html;
+                    cleaned = true;
+                }
             });
             if(cleaned) saveDB();
         }
@@ -216,9 +287,9 @@
         #xf-mob-fab:hover { transform: scale(1.1); }
         .xf-mob-icon { width: 24px; height: 24px; fill: #fff; }
 
-        /* Dashboard */
-        #xf-dash-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 10001; display: none; align-items: center; justify-content: center; backdrop-filter: blur(8px); direction: ${IS_RTL?'rtl':'ltr'}; }
-        #xf-dash-box {
+        /* Dashboard & Batch Modal */
+        #xf-dash-overlay, #xf-batch-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 10001; display: none; align-items: center; justify-content: center; backdrop-filter: blur(8px); direction: ${IS_RTL?'rtl':'ltr'}; }
+        #xf-dash-box, #xf-batch-box {
             width: 95%; max-width: 400px; max-height: 80vh;
             background: #000; border: 1px solid var(--xf-border); border-radius: 16px; padding: 16px;
             font-family: ${FONT_STACK}; box-shadow: 0 20px 50px rgba(0,0,0,0.8); color: #fff;
@@ -319,15 +390,419 @@
         return COUNTRY_MAP[code] || code;
     }
 
-    // New helper: Clean DB for export (removes blocked status)
     function getCleanDB() {
-        const clean = JSON.parse(JSON.stringify(db)); // Deep copy
+        const clean = JSON.parse(JSON.stringify(db));
         Object.keys(clean).forEach(k => {
             if (clean[k].data) delete clean[k].data.isBlocked;
             if (clean[k].html) delete clean[k].html;
         });
         return clean;
     }
+
+    // --- BATCH PROCESSING LOGIC ---
+
+    function initBatchModal() {
+        batchOverlayEl = document.createElement("div");
+        batchOverlayEl.id = "xf-batch-overlay";
+        batchOverlayEl.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10002; display: none; align-items: center; justify-content: center; backdrop-filter: blur(8px);";
+        document.body.appendChild(batchOverlayEl);
+    }
+
+    function updateBatchUI(clearList = false) {
+        const statusEl = document.getElementById('xf-batch-status');
+        const progressEl = document.getElementById('xf-batch-progress');
+        const rateEl = document.getElementById('xf-batch-rate-status');
+        const startBtn = document.getElementById('xf-batch-start');
+        const resultsListEl = document.getElementById('xf-batch-results-list');
+
+        if (!statusEl) return;
+
+        if (batchState.isAborted && !batchState.isRunning) {
+            statusEl.textContent = TEXT.batch.status_stopped;
+            statusEl.style.color = 'var(--xf-red)';
+            startBtn.textContent = TEXT.batch.btn_start;
+            startBtn.disabled = false;
+            startBtn.classList.remove('xf-btn-red');
+            startBtn.classList.add('xf-btn-blue');
+        } else if (batchState.isPaused) {
+            statusEl.textContent = TEXT.batch.status_paused;
+            statusEl.style.color = 'var(--xf-orange)';
+            rateEl.textContent = TEXT.batch.rate_limit_wait.replace('{s}', batchState.currentWaitTime);
+            startBtn.textContent = TEXT.dashboard.btn_stop;
+        } else if (batchState.isRunning) {
+            statusEl.textContent = TEXT.batch.status_running;
+            statusEl.style.color = 'var(--xf-blue)';
+            rateEl.textContent = '';
+            startBtn.textContent = TEXT.dashboard.btn_stop;
+            startBtn.classList.remove('xf-btn-blue');
+            startBtn.classList.add('xf-btn-red');
+        } else {
+            // Idle or Done
+            if (batchState.total > 0 && batchState.index === batchState.total) {
+                statusEl.textContent = TEXT.batch.status_done;
+                statusEl.style.color = 'var(--xf-green)';
+            } else {
+                statusEl.textContent = TEXT.batch.status_idle;
+                statusEl.style.color = 'var(--xf-green)';
+            }
+            rateEl.textContent = '';
+            startBtn.textContent = TEXT.batch.btn_start;
+            startBtn.disabled = false;
+            startBtn.classList.remove('xf-btn-red');
+            startBtn.classList.add('xf-btn-blue');
+        }
+
+        progressEl.innerHTML = TEXT.batch.progress
+            .replace('{c}', batchState.index)
+            .replace('{t}', batchState.total)
+            .replace('{ok}', batchState.okCount)
+            .replace('{err}', batchState.errCount);
+
+        if (clearList) {
+            resultsListEl.innerHTML = '';
+        } else if (resultsListEl) {
+            resultsListEl.scrollTop = resultsListEl.scrollHeight;
+        }
+    }
+
+    /**
+     * Maps the raw GraphQL response data to the required 10-column structured output.
+     */
+    function mapRawDataToBatchOutput(res) {
+        const isDeleted = res.is_deleted === true;
+
+        if (isDeleted) {
+            return {
+                [TEXT.batch.col_username]: res.core.screen_name,
+                [TEXT.batch.col_name]: 'SUSPENDED/DELETED',
+                [TEXT.batch.col_id_changes]: 0,
+                [TEXT.batch.col_last_change]: 'N/A',
+                [TEXT.batch.col_created]: 'N/A',
+                [TEXT.batch.col_deleted]: 0, // 0 means deleted/suspended
+                [TEXT.batch.col_device]: 2,
+                [TEXT.batch.col_location_status]: 0,
+                [TEXT.batch.col_gender]: 2,
+                [TEXT.batch.col_numeric_id]: 'N/A'
+            };
+        }
+
+        const core = res.core || res.legacy || {};
+        const about = res.about_profile || res.aboutProfile || {};
+
+        // 1. Username
+        const username = core.screen_name || 'N/A';
+        // 2. Name
+        const name = core.name || 'N/A';
+        // 10. Numeric ID
+        const rest_id = res.rest_id || 'N/A';
+
+        // 3. Username Change Count
+        const renameCount = parseInt(about.username_changes?.count || 0);
+
+        // 4. Last Changed At (msec) -> Convert to Gregorian Date string (UTC)
+        const lastChangedMsec = about.username_changes?.last_changed_at_msec;
+        let lastChangedDate = 'N/A';
+        if (lastChangedMsec) {
+            lastChangedDate = new Date(parseInt(lastChangedMsec)).toUTCString();
+        }
+
+        // 5. Created At (Gregorian Date string - UTC)
+        const createdAt = core.created_at;
+        const createdDate = createdAt ? new Date(createdAt).toUTCString() : 'N/A';
+
+        // 6. Account Status (1: Active/Exists)
+        const accountStatus = 1;
+
+        // 7. Device Type (0=Android, 1=iPhone, 2=Web/Other)
+        const sourceRaw = about.source || TEXT.values.unknown;
+        let deviceType = 2; // Default Web/Other
+        const match = sourceRaw.match(SOURCE_REGEX);
+        if (match) {
+            const type = match[2].toLowerCase();
+            if (type.includes("app") || type.includes("ios") || type.includes("iphone")) deviceType = 1;
+            else if (type.includes("play") || type.includes("android")) deviceType = 0;
+        }
+
+        // 8. Location Status (0=None, 1=Accurate/i, 2=VPN/Proxy)
+        let locationStatus = 0;
+        if (about.account_based_in) {
+            if (about.location_accurate === true) {
+                locationStatus = 1; // Accurate (i)
+            } else {
+                locationStatus = 2; // Inaccurate (VPN/Proxy)
+            }
+        }
+
+        // 9. Gender (0=Male, 1=Female, 2=Unknown)
+        const gender = 2;
+
+
+        return {
+            [TEXT.batch.col_username]: username,
+            [TEXT.batch.col_name]: name,
+            [TEXT.batch.col_id_changes]: renameCount,
+            [TEXT.batch.col_last_change]: lastChangedDate,
+            [TEXT.batch.col_created]: createdDate,
+            [TEXT.batch.col_deleted]: accountStatus,
+            [TEXT.batch.col_device]: deviceType,
+            [TEXT.batch.col_location_status]: locationStatus,
+            [TEXT.batch.col_gender]: gender,
+            [TEXT.batch.col_numeric_id]: rest_id
+        };
+    }
+
+    async function handleRateLimit() {
+        batchState.isPaused = true;
+        batchState.currentWaitTime = RATE_LIMIT_PAUSE;
+
+        // Show rate limit message in results list
+        const resultsListEl = document.getElementById('xf-batch-results-list');
+        if (resultsListEl) resultsListEl.innerHTML += `<div style="color:var(--xf-orange); font-weight: bold;">--- ${TEXT.batch.rate_limit_msg} ---</div>`;
+
+        updateBatchUI();
+
+        const startTime = Date.now();
+
+        while (batchState.currentWaitTime > 0 && !batchState.isAborted) {
+            await new Promise(r => setTimeout(r, 1000));
+            batchState.currentWaitTime = Math.max(0, RATE_LIMIT_PAUSE - Math.floor((Date.now() - startTime) / 1000));
+            updateBatchUI();
+        }
+
+        if (!batchState.isAborted) {
+            batchState.isPaused = false;
+            // Resume processing immediately after pause
+            if (resultsListEl) resultsListEl.innerHTML += `<div style="color:var(--xf-green);">--- Resuming Processing ---</div>`;
+            processBatchStep();
+        } else {
+            batchState.isRunning = false;
+            updateBatchUI();
+        }
+    }
+
+
+    async function processBatchStep() {
+        while (batchState.index < batchState.total && batchState.isRunning && !batchState.isAborted) {
+            const username = batchState.list[batchState.index];
+            const index = batchState.index;
+            const resultsListEl = document.getElementById('xf-batch-results-list');
+
+            // Skip if already paused by rate limit
+            if (batchState.isPaused) return;
+
+            let result = null;
+            let statusChar = '❌';
+
+            try {
+                const url = `https://${location.host}/i/api/graphql/${CONFIG.queryId}/AboutAccountQuery?variables=${encodeURIComponent(JSON.stringify({screenName:username}))}&features=${encodeURIComponent(JSON.stringify(CONFIG.features))}&fieldToggles=${encodeURIComponent(JSON.stringify({withAuxiliaryUserLabels:false}))}`;
+
+                const response = await fetch(url, {
+                    headers: {
+                        "authorization": `Bearer ${CONFIG.bearerToken}`,
+                        "x-csrf-token": getCsrf(),
+                        "content-type": "application/json"
+                    }
+                });
+
+                // Check for rate limiting status (429)
+                if (response.status === 429) {
+                    batchState.isRunning = true;
+                    await handleRateLimit();
+                    return; // Exit loop, waiting for pause completion
+                }
+
+                const json = await response.json();
+
+                if (json.errors && json.errors.length > 0) {
+                     const error = json.errors[0].message;
+                     let displayName = 'ERROR';
+
+                     // Common errors indicating deletion or suspension
+                     if (error.includes("Not found") || error.includes("Suspended") || error.includes("Could not find user")) {
+                         result = mapRawDataToBatchOutput({
+                             core: { screen_name: username, name: 'N/A' },
+                             rest_id: 'N/A',
+                             about_profile: {},
+                             is_deleted: true // Flag indicating deleted/suspended
+                         });
+                         displayName = 'Suspended';
+                         statusChar = '🚫';
+                         batchState.okCount++; // Count as handled success
+                     } else {
+                         throw new Error(`API Error: ${error}`);
+                     }
+
+                     if (resultsListEl) {
+                         resultsListEl.innerHTML += `<div style="color:var(--xf-red);">[${index + 1}/${batchState.total}] ${statusChar} @${username} (${displayName})</div>`;
+                     }
+
+
+                } else {
+                    const res = json?.data?.user?.result || json?.data?.user_result_by_screen_name?.result;
+                    if (!res) throw new Error("No user result data.");
+
+                    result = mapRawDataToBatchOutput(res);
+                    batchState.okCount++;
+                    statusChar = '✅';
+
+                    if (resultsListEl) {
+                         resultsListEl.innerHTML += `<div>[${index + 1}/${batchState.total}] ${statusChar} @${username} (${result[TEXT.batch.col_name]})</div>`;
+                    }
+                }
+
+                batchState.results.push(result);
+
+            } catch (e) {
+                console.error(`Error fetching @${username}:`, e);
+                batchState.errCount++;
+                // Push an error record
+                batchState.results.push({
+                    [TEXT.batch.col_username]: username,
+                    [TEXT.batch.col_name]: 'API ERROR',
+                    [TEXT.batch.col_id_changes]: 'N/A',
+                    [TEXT.batch.col_last_change]: 'N/A',
+                    [TEXT.batch.col_created]: 'N/A',
+                    [TEXT.batch.col_deleted]: 0,
+                    [TEXT.batch.col_device]: 2,
+                    [TEXT.batch.col_location_status]: 0,
+                    [TEXT.batch.col_gender]: 2,
+                    [TEXT.batch.col_numeric_id]: 'N/A'
+                });
+                if (resultsListEl) {
+                    resultsListEl.innerHTML += `<div style="color:var(--xf-red);">[${index + 1}/${batchState.total}] ❌ @${username} (API Error)</div>`;
+                }
+            }
+
+            // Update UI
+            batchState.index++;
+            updateBatchUI();
+
+            // Wait for 1 second delay
+            await new Promise(r => setTimeout(r, BATCH_DELAY));
+        }
+
+        // Final state check
+        if (batchState.index === batchState.total || batchState.isAborted) {
+            batchState.isRunning = false;
+        }
+        updateBatchUI();
+    }
+
+    function startBatchProcessing() {
+        if (batchState.isRunning) {
+            batchState.isAborted = true;
+            updateBatchUI();
+            return;
+        }
+
+        const inputArea = document.getElementById('xf-batch-input');
+        const rawList = inputArea.value.split('\n').map(u => u.trim().replace(/^@/, '')).filter(u => u.length > 0);
+
+        if (rawList.length === 0) return;
+
+        // Reset state for a new run
+        batchState.list = rawList;
+        batchState.total = rawList.length;
+        batchState.index = 0;
+        batchState.okCount = 0;
+        batchState.errCount = 0;
+        batchState.isRunning = true;
+        batchState.isAborted = false;
+        batchState.isPaused = false;
+        batchState.results = [];
+
+        // Clear list display
+        document.getElementById('xf-batch-results-list').innerHTML = '';
+
+        updateBatchUI();
+
+        // Start async processing
+        processBatchStep();
+    }
+
+    function exportBatchJson() {
+        if (batchState.results.length === 0) {
+            alert("No results to export yet.");
+            return;
+        }
+        const blob = new Blob([JSON.stringify(batchState.results, null, 2)], { type: "application/json" });
+        const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${TEXT.batch.export_filename}_${Date.now()}.json`;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    }
+
+    function showBatchModal() {
+        // Hide dashboard first
+        document.getElementById("xf-dash-overlay").style.display = "none";
+
+        batchOverlayEl.innerHTML = `
+            <div id="xf-batch-box" class="xf-dash-box" style="max-width: 500px; max-height: 90vh;">
+                <div class="xf-dash-title">${TEXT.batch.title}</div>
+
+                <textarea id="xf-batch-input" class="xf-textarea" style="height: 150px; margin-top: 0; direction: ltr;" placeholder="${TEXT.batch.input_placeholder}"></textarea>
+
+                <div style="margin: 10px 0; font-size: 13px; font-weight: bold; display: flex; justify-content: space-between;">
+                    <span id="xf-batch-status" style="color: var(--xf-green);">${TEXT.batch.status_idle}</span>
+                    <span id="xf-batch-rate-status" style="color: var(--xf-orange); font-size: 11px;"></span>
+                </div>
+
+                <div id="xf-batch-progress" style="font-size: 11px; color: var(--xf-dim); margin-bottom: 10px; direction: ltr;">
+                    ${TEXT.batch.progress.replace('{c}', 0).replace('{t}', 0).replace('{ok}', 0).replace('{err}', 0)}
+                </div>
+
+                <div class="xf-btn-row">
+                    <button id="xf-batch-start" class="xf-dash-btn xf-btn-blue">${TEXT.batch.btn_start}</button>
+                    <button id="xf-batch-export" class="xf-dash-btn xf-btn-green">${TEXT.batch.btn_export_json}</button>
+                </div>
+                <div class="xf-btn-row">
+                    <button id="xf-batch-clear-list" class="xf-dash-btn xf-btn-red" style="flex: 0.5;">Clear Input</button>
+                    <button id="xf-batch-close" class="xf-dash-btn xf-btn-red" style="background:transparent;border:1px solid var(--xf-dim);color:var(--xf-dim); flex: 1.5;">${TEXT.btn.close}</button>
+                </div>
+
+                <h3 style="font-size: 14px; margin-top: 15px; border-bottom: 1px solid var(--xf-border); padding-bottom: 5px;">Results (${TEXT.batch.col_username})</h3>
+                <div id="xf-batch-results-list" style="flex: 1; overflow-y: auto; background: #16181c; border-radius: 8px; padding: 5px; font-size: 12px; font-family: monospace; color: var(--xf-text); direction: ltr;">
+                    <!-- Results go here -->
+                </div>
+            </div>
+        `;
+
+        batchOverlayEl.style.display = "flex";
+
+        document.getElementById('xf-batch-start').onclick = startBatchProcessing;
+        document.getElementById('xf-batch-export').onclick = exportBatchJson;
+        document.getElementById('xf-batch-close').onclick = () => {
+            if (batchState.isRunning) {
+                batchState.isAborted = true; // Signal abortion
+            }
+            batchOverlayEl.style.display = "none";
+        };
+        document.getElementById('xf-batch-clear-list').onclick = () => {
+            document.getElementById('xf-batch-input').value = '';
+            batchState.results = [];
+            updateBatchUI(true);
+        };
+
+        // Populate input area if list exists from a previous run
+        if (batchState.list.length > 0 && batchState.index < batchState.total) {
+            inputArea.value = batchState.list.slice(batchState.index).join('\n');
+        } else if (batchState.list.length > 0) {
+            // If finished, show the entire list
+            inputArea.value = batchState.list.join('\n');
+        }
+
+        // Re-render results log if available
+        const resultsListEl = document.getElementById('xf-batch-results-list');
+        if (resultsListEl) {
+             batchState.results.forEach(result => {
+                 const username = result[TEXT.batch.col_username];
+                 const name = result[TEXT.batch.col_name];
+                 const statusChar = (name === 'ERROR' || name === 'API ERROR' || name === 'SUSPENDED/DELETED') ? '❌' : '✅';
+                 resultsListEl.innerHTML += `<div>${statusChar} @${username} (${name})</div>`;
+             });
+        }
+
+        updateBatchUI(); // Initialize UI state
+    }
+
 
     // --- DASHBOARD UI ---
     function injectNativeMenu() {
@@ -377,7 +852,6 @@
         document.body.appendChild(input);
     }
 
-    // New helper to get filtered users logic centrally
     function getFilteredUsers() {
         const locFilter = document.getElementById("xf-filter-loc")?.value.toLowerCase() || "";
         const riskFilter = document.getElementById("xf-filter-risk")?.value || "ALL";
@@ -405,7 +879,7 @@
         if (!listContainer) return;
 
         listContainer.innerHTML = '';
-        const filteredKeys = getFilteredUsers(); // Use helper
+        const filteredKeys = getFilteredUsers();
 
         const totalPages = Math.ceil(filteredKeys.length / ITEMS_PER_PAGE) || 1;
         if (currentPage > totalPages) currentPage = 1;
@@ -419,7 +893,7 @@
             const riskTag = entry.riskLabel;
             const isBlocked = entry.isBlocked === true;
             let badgeColor = "#fff";
-            
+
             if (riskTag === TEXT.risk.safe || riskTag === TEXT.risk.normal) badgeColor = "var(--xf-green)";
             else if (riskTag === TEXT.risk.detected) badgeColor = "var(--xf-red)";
             else if (riskTag === TEXT.risk.anomaly) badgeColor = "var(--xf-orange)";
@@ -427,7 +901,7 @@
             const row = document.createElement("div");
             row.className = `xf-user-row ${isBlocked ? 'xf-blocked' : ''}`;
             const displayRisk = isBlocked ? `🚫 ${riskTag}` : riskTag;
-            
+
             row.innerHTML = `<div><div class="xf-u-name">@${user}</div><span class="xf-u-meta">📍 ${entry.country} | 📱 ${entry.device.split(' ')[0]}</span></div><div class="xf-u-risk" style="background:${badgeColor}">${displayRisk}</div>`;
             row.onclick = () => window.open(`https://x.com/${user}`, '_blank');
             listContainer.appendChild(row);
@@ -474,19 +948,20 @@
                 <div id="xf-pagination" class="xf-pagination"></div>
 
                 <div class="xf-btn-row">
-                    <button id="xf-btn-backup" class="xf-dash-btn xf-btn-blue">${TEXT.dashboard.btn_backup}</button>
+                    <button id="xf-btn-batch" class="xf-dash-btn xf-btn-blue">${TEXT.batch.btn_open}</button>
                     <button id="xf-btn-cloud" class="xf-dash-btn xf-btn-purple">${TEXT.dashboard.btn_cloud}</button>
                 </div>
                 <div class="xf-btn-row">
+                    <button id="xf-btn-backup" class="xf-dash-btn xf-btn-blue">${TEXT.dashboard.btn_backup}</button>
                     <button id="xf-btn-restore" class="xf-dash-btn xf-btn-green">${TEXT.dashboard.btn_restore}</button>
-                    <button id="xf-btn-contrib" class="xf-dash-btn xf-btn-orange" style="color:#000;">${TEXT.dashboard.btn_contrib}</button>
                 </div>
                 <div class="xf-btn-row">
                     <button id="xf-btn-csv" class="xf-dash-btn xf-btn-blue" style="background:transparent;border:1px solid var(--xf-blue);color:var(--xf-blue)">${TEXT.dashboard.btn_export}</button>
-                    <button id="xf-btn-clear" class="xf-dash-btn xf-btn-red">${TEXT.dashboard.btn_clear}</button>
+                    <button id="xf-btn-contrib" class="xf-dash-btn xf-btn-orange" style="color:#000;">${TEXT.dashboard.btn_contrib}</button>
                 </div>
                 <div class="xf-btn-row">
-                     <button id="xf-btn-block" class="xf-dash-btn xf-btn-red" style="border:1px solid #fff;background:#420000;">${TEXT.dashboard.btn_block}</button>
+                    <button id="xf-btn-clear" class="xf-dash-btn xf-btn-red" style="flex: 0.5;">${TEXT.dashboard.btn_clear}</button>
+                    <button id="xf-btn-block" class="xf-dash-btn xf-btn-red" style="border:1px solid #fff;background:#420000; flex: 1.5;">${TEXT.dashboard.btn_block}</button>
                 </div>
 
                 <div id="xf-dash-close-btn" style="margin-top:10px;text-align:center;font-size:12px;cursor:pointer;color:#71767b;">${TEXT.btn.close}</div>
@@ -504,7 +979,8 @@
         document.getElementById("xf-btn-restore").onclick = () => document.getElementById("xf-restore-input").click();
         document.getElementById("xf-btn-csv").onclick = exportCSV;
         document.getElementById("xf-btn-clear").onclick = clearCache;
-        document.getElementById("xf-btn-block").onclick = handleMassBlock; 
+        document.getElementById("xf-btn-block").onclick = handleMassBlock;
+        document.getElementById("xf-btn-batch").onclick = showBatchModal; // New binding
         document.getElementById("xf-dash-close-btn").onclick = () => { overlay.style.display = "none"; };
 
         document.getElementById('xf-dash-l-auto').onclick = () => setLang('auto');
@@ -525,14 +1001,14 @@
         const rawList = getFilteredUsers();
         // Filter out users who are ALREADY blocked to avoid redundant API calls
         const usersToBlock = rawList.filter(u => !db[u].data.isBlocked);
-        
+
         if(usersToBlock.length === 0) return alert(TEXT.dashboard.msg_no_targets);
 
         if(!confirm(TEXT.dashboard.msg_block_conf.replace("{n}", usersToBlock.length))) return;
 
         const btn = document.getElementById("xf-btn-block");
         const originalText = TEXT.dashboard.btn_block;
-        
+
         isBlockingProcess = true;
         abortBlock = false;
         btn.innerText = TEXT.dashboard.btn_stop;
@@ -546,13 +1022,13 @@
 
             const username = usersToBlock[i];
             const userId = db[username].data.id;
-            
+
             btn.innerText = `${TEXT.dashboard.btn_stop} (${i+1}/${usersToBlock.length})`;
-            
+
             try {
                 await performBlock(userId);
                 // Mark as blocked in DB immediately so it persists even if we stop
-                db[username].data.isBlocked = true; 
+                db[username].data.isBlocked = true;
                 saveDB();
                 renderUserList(db); // Update UI to show blocked status
                 successCount++;
@@ -578,7 +1054,7 @@
     async function performBlock(userId) {
         const body = new URLSearchParams();
         body.append("user_id", userId);
-        
+
         await fetch("https://x.com/i/api/1.1/blocks/create.json", {
             method: "POST",
             headers: {
@@ -613,11 +1089,11 @@
     function contributeData() {
         const count = Object.keys(db).length;
         if (count === 0) return alert("No data to contribute.");
-        
+
         // USE CLEAN DB (Privacy)
         const cleanDB = getCleanDB();
         const blob = new Blob([JSON.stringify(cleanDB, null, 2)], { type: "application/json" });
-        
+
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `contribution.json`;
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
         alert(TEXT.dashboard.contrib_info);
@@ -629,7 +1105,7 @@
         // USE CLEAN DB (Privacy)
         const cleanDB = getCleanDB();
         const blob = new Blob([JSON.stringify(cleanDB, null, 2)], { type: "application/json" });
-        
+
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `xf_backup_${Date.now()}.json`;
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
@@ -650,7 +1126,7 @@
     }
 
     function exportCSV() {
-        const keys = getFilteredUsers(); 
+        const keys = getFilteredUsers();
         let csv = "\uFEFFUsername,ID,Location,Device,Risk,Created,Link,Blocked\n";
         keys.forEach(user => {
             const entry = db[user].data;
@@ -837,7 +1313,7 @@
             const countryDisplay = getCountryDisplay(rawCountry);
             const name = core.name || ""; const bio = core.description || "";
             const isPersianSpeaker = ARABIC_SCRIPT_REGEX.test(name) || ARABIC_SCRIPT_REGEX.test(bio);
-            
+
             // Check if user is ALREADY blocked via API (res.legacy.blocking)
             // Combine with DB memory
             const apiBlocked = res.legacy?.blocking === true;
@@ -915,7 +1391,10 @@
         injectNativeMenu();
     }, 5000);
 
-    setTimeout(initDashboard, 2000);
+    setTimeout(() => {
+        initDashboard();
+        initBatchModal();
+    }, 2000);
 
     let observerTimeout;
     const observer = new MutationObserver((mutations) => {
