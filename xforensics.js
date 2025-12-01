@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         X Profile Forensics (v19.5)
+// @name         X Profile Forensics (v19.6)
 // @namespace    http://tampermonkey.net/
-// @version      19.5.0
-// @description  Forensics tool. Fixed Issue where tags/checkboxes would not persist until page refresh.
+// @version      19.6.0
+// @description  Forensics tool. Fixed Issue where Dates not formated correctly.
 // @author       https://x.com/yebekhe
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -22,7 +22,7 @@
 
     const TRANSLATIONS = {
         en: {
-            title: "Forensics v19.5",
+            title: "Forensics v19.6",
             menu_btn: "Forensics",
             labels: { location: "Location", device: "Device", id: "Perm ID", created: "Created", renamed: "Renamed", identity: "Identity", lang: "Language", type: "Type" },
             risk: { safe: "SAFE", detected: "DETECTED", anomaly: "ANOMALY", caution: "CAUTION", normal: "NORMAL", verified: "VERIFIED ID" },
@@ -126,7 +126,7 @@
             lang_sel: "Lang:"
         },
         fa: {
-            title: "تحلیلگر پروفایل ۱۹.۵",
+            title: "تحلیلگر پروفایل ۱۹.۶",
             menu_btn: "جرم‌شناسی",
             labels: { location: "موقعیت", device: "دستگاه", id: "شناسه", created: "ساخت", renamed: "تغییر نام", identity: "هویت", lang: "زبان", type: "نوع" },
             risk: { safe: "امن", detected: "هشدار", anomaly: "ناهنجاری", caution: "احتیاط", normal: "طبیعی", verified: "تایید شده" },
@@ -540,11 +540,11 @@
         const lastChangedMsec = about.username_changes?.last_changed_at_msec;
         let lastChangedDate = 'N/A';
         if (lastChangedMsec) {
-            lastChangedDate = new Date(parseInt(lastChangedMsec)).toUTCString();
+            lastChangedDate = formatTime(parseInt(lastChangedMsec));
         }
 
         const createdAt = core.created_at;
-        const createdDate = createdAt ? new Date(createdAt).toUTCString() : 'N/A';
+        const createdDate = createdAt ? formatTime(createdAt) : 'N/A';
         const accountStatus = 1;
 
         const sourceRaw = about.source || TEXT.values.unknown;
@@ -1200,7 +1200,15 @@
                         else devStr = "Web/Other";
 
                         const rawUtc = item[createdKey] || "";
-                        const formattedCreated = rawUtc !== "N/A" ? formatTime(new Date(rawUtc)) : "N/A";
+                        let formattedCreated = "N/A";
+                        if (rawUtc && rawUtc !== "N/A") {
+                             const dateObj = new Date(rawUtc);
+                             if (!isNaN(dateObj.getTime())) {
+                                 formattedCreated = formatTime(dateObj);
+                             } else {
+                                 formattedCreated = rawUtc;
+                             }
+                        }
                         const isVerified = item[verKey] === 1;
                         const langCode = (item[langKey] === 'fa') ? 'fa' : null;
 
