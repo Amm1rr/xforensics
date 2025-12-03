@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         X Profile Forensics (v20.2)
+// @name         X Profile Forensics (v20.3)
 // @namespace    http://tampermonkey.net/
 // @version      20.3.0
 // @description  Forensics tool. Scrapes live follower/following/post counts from profile page for accurate behavioral analysis.
