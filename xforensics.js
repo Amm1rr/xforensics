@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         X Profile Forensics (v19.6)
+// @name         X Profile Forensics (v19.7 Fix)
 // @namespace    http://tampermonkey.net/
-// @version      19.6.0
-// @description  Forensics tool. Fixed Issue where Dates not formated correctly.
-// @author       https://x.com/yebekhe
+// @version      19.7.0
+// @description  Forensics tool. Fixed Dashboard Search & Added Batch Auto-Merge.
+// @author       https://x.com/yebekhe (Fixed by Assistant)
 // @match        https://x.com/*
 // @match        https://twitter.com/*
 // @connect      raw.githubusercontent.com
@@ -22,7 +22,7 @@
 
     const TRANSLATIONS = {
         en: {
-            title: "Forensics v19.6",
+            title: "Forensics v19.7",
             menu_btn: "Forensics",
             labels: { location: "Location", device: "Device", id: "Perm ID", created: "Created", renamed: "Renamed", identity: "Identity", lang: "Language", type: "Type" },
             risk: { safe: "SAFE", detected: "DETECTED", anomaly: "ANOMALY", caution: "CAUTION", normal: "NORMAL", verified: "VERIFIED ID" },
@@ -117,7 +117,8 @@
                 col_location: "Location",
                 col_avatar: "Avatar URL",
                 col_lang: "Language (fa/other)",
-                col_verified: "Verified (0/1)"
+                col_verified: "Verified (0/1)",
+                merge_label: "Merge valid results into Database automatically"
             },
             btn: { view_avatar: "View Avatar", close: "Close", retry: "Refresh Data" },
             values: { gov: "Government", unknown: "Unknown", west_asia: "West Asia", fa_script: "Farsi/Arabic" },
@@ -126,7 +127,7 @@
             lang_sel: "Lang:"
         },
         fa: {
-            title: "تحلیلگر پروفایل ۱۹.۶",
+            title: "تحلیلگر پروفایل ۱۹.۷",
             menu_btn: "جرم‌شناسی",
             labels: { location: "موقعیت", device: "دستگاه", id: "شناسه", created: "ساخت", renamed: "تغییر نام", identity: "هویت", lang: "زبان", type: "نوع" },
             risk: { safe: "امن", detected: "هشدار", anomaly: "ناهنجاری", caution: "احتیاط", normal: "طبیعی", verified: "تایید شده" },
@@ -221,7 +222,8 @@
                 col_location: "موقعیت",
                 col_avatar: "لینک آواتار",
                 col_lang: "زبان (fa/other)",
-                col_verified: "تیک (0/1)"
+                col_verified: "تیک (0/1)",
+                merge_label: "ذخیره خودکار نتایج سالم در دیتابیس"
             },
             btn: { view_avatar: "آواتار اصلی", close: "بستن", retry: "بروزرسانی" },
             values: { gov: "دولتی", unknown: "نامشخص", west_asia: "غرب آسیا", fa_script: "فارسی/عربی" },
@@ -618,6 +620,8 @@
 
 
     async function processBatchStep() {
+        const shouldMerge = document.getElementById('xf-batch-auto-save')?.checked;
+
         while (batchState.index < batchState.total && batchState.isRunning && !batchState.isAborted) {
             const username = batchState.list[batchState.index];
             const index = batchState.index;
@@ -682,6 +686,60 @@
                     if (resultsListEl) {
                          resultsListEl.innerHTML += `<div>[${index + 1}/${batchState.total}] ${statusChar} @${username} (${displayLabel})</div>`;
                     }
+
+                    // --- MERGE LOGIC START ---
+                    if (shouldMerge) {
+                        try {
+                            const about = res.about_profile || res.aboutProfile || {};
+                            const verif = res.verification_info || {};
+                            const core = res.core || res.legacy || {};
+                            const sourceRaw = about.source || TEXT.values.unknown;
+                            let devShort = sourceRaw, devFull = sourceRaw;
+                            const match = sourceRaw.match(SOURCE_REGEX);
+                            if (match) {
+                                const region = match[1].trim(); const type = match[2].toLowerCase(); let tech = TEXT.labels.device;
+                                if (type.includes("app") || type.includes("ios")) tech = "iPhone"; if (type.includes("play") || type.includes("android")) tech = "Android";
+                                devShort = tech; devFull = `${tech} (${region})`;
+                            } else if (IS_MOBILE && sourceRaw !== TEXT.values.unknown) devShort = TEXT.labels.device;
+
+                            const rawCountry = about.account_based_in;
+                            const countryDisplay = getCountryDisplay(rawCountry);
+                            const name = core.name || ""; const bio = core.description || "";
+                            const isPersianSpeaker = ARABIC_SCRIPT_REGEX.test(name) || ARABIC_SCRIPT_REGEX.test(bio);
+                            const apiBlocked = res.legacy?.blocking === true;
+
+                            const data = {
+                                country: countryDisplay, countryCode: rawCountry, device: devShort, deviceFull: devFull, id: res.rest_id,
+                                created: formatTime(res.core?.created_at || res.legacy?.created_at), renamed: parseInt(about.username_changes?.count || 0),
+                                isAccurate: about.location_accurate, isIdVerified: verif.is_identity_verified === true, langCode: isPersianSpeaker ? 'fa' : null,
+                                avatar: (res.avatar?.image_url || "").replace("_normal", "_400x400"),
+                                isBlocked: apiBlocked
+                            };
+
+                            let pillText = `📍 ${data.country}`;
+                            if (data.country === TEXT.values.unknown) pillText = `📱 ${IS_MOBILE ? data.device : data.deviceFull}`;
+                            else if (!IS_MOBILE) pillText += ` | 📱 ${data.deviceFull}`; else pillText += ` | 📱 ${data.device}`;
+
+                            let color = "var(--xf-green)";
+                            const isTargetLoc = (data.countryCode === "Iran" || data.countryCode === "West Asia");
+                            const isTargetDev = (data.deviceFull || "").match(/Iran|West Asia/i);
+                            if (!data.isAccurate) color = isTargetDev ? "var(--xf-green)" : "var(--xf-red)";
+                            else if (isTargetLoc) color = "var(--xf-orange)";
+
+                            // Preserve tags/notes if updating
+                            const existingTags = db[username]?.tags || [];
+                            const existingNote = db[username]?.note || "";
+
+                            db[username] = {
+                                data, pillText, color, note: existingNote, tags: existingTags,
+                                html: renderCardHTML(data, username, existingTags, existingNote)
+                            };
+                            saveDB();
+                        } catch (mergeErr) {
+                            console.error("Auto-Merge failed for", username, mergeErr);
+                        }
+                    }
+                    // --- MERGE LOGIC END ---
                 }
 
                 batchState.results.push(result);
@@ -764,6 +822,13 @@
                             ${TEXT.batch[field.labelKey]}
                         </label>
                     `).join('')}
+                </div>
+
+                <div style="margin-top:10px; border-top:1px solid var(--xf-border); padding-top:5px;">
+                    <label class="xf-batch-opt" style="font-weight:bold; color:var(--xf-blue);">
+                        <input type="checkbox" id="xf-batch-auto-save">
+                        ${TEXT.batch.merge_label || "Merge valid results into Database automatically"}
+                    </label>
                 </div>
 
                 <textarea id="xf-batch-input" class="xf-textarea" style="height: 100px; margin-top: 5px; direction: ltr;" placeholder="${TEXT.batch.input_placeholder}"></textarea>
@@ -917,6 +982,9 @@
         const filteredKeys = [];
 
         for (const user of allKeys) {
+            // FIX START: Safety Check to prevent crashes
+            if (!db[user] || !db[user].data) continue;
+
             const entry = db[user].data;
             const tags = db[user].tags || [];
             const riskTag = entry.riskLabel;
@@ -926,7 +994,10 @@
             // Search in username, ID, or tags
             if (searchFilter) {
                 const tagMatch = tags.some(t => t.toLowerCase().includes(searchFilter));
-                const userMatch = user.toLowerCase().includes(searchFilter) || entry.id.includes(searchFilter);
+                // FIX START: Ensure entry.id exists and cast to string for .includes()
+                const idString = entry.id ? String(entry.id) : "";
+                const userMatch = user.toLowerCase().includes(searchFilter) || idString.includes(searchFilter);
+                // FIX END
                 if (!userMatch && !tagMatch) continue;
             }
 
