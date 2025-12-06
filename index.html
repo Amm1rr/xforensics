@@ -218,7 +218,6 @@
 
                             <!-- Dynamic Buttons Container -->
                             <div id="log-buttons-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                                <!-- Buttons will be injected here by JS -->
                                 <div class="col-span-full text-center text-xs text-slate-500 py-4 animate-pulse">در حال بررسی فایل‌های موجود...</div>
                             </div>
 
@@ -230,7 +229,7 @@
                                 </div>
                                 <div class="max-h-96 overflow-y-auto">
                                     <table class="w-full text-left text-xs text-slate-400 font-mono">
-                                        <thead class="bg-slate-950 text-slate-500 sticky top-0"><tr><th class="p-3 text-right">تاریخ</th><th class="p-3 text-right">متن توییت</th><th class="p-3">لینک</th></tr></thead>
+                                        <thead class="bg-slate-950 text-slate-500 sticky top-0"><tr><th class="p-3 text-right w-32">تاریخ</th><th class="p-3 text-right">متن توییت</th><th class="p-3 w-16">لینک</th></tr></thead>
                                         <tbody id="log-body" class="divide-y divide-slate-800"></tbody>
                                     </table>
                                 </div>
@@ -410,7 +409,6 @@
             let foundCount = 0;
             let buttonsHtml = '';
 
-            // Check each log type (Parallel Fetches)
             const checks = KNOWN_LOG_TYPES.map(async (type) => {
                 try {
                     const res = await fetch(`${LOGS_BASE_URL}/${id}/${type.id}.json`, { method: 'HEAD' });
@@ -456,7 +454,15 @@
                 if(!res.ok) throw new Error("404");
                 const tweets = await res.json();
                 status.className = "text-xs font-mono text-green-500"; status.innerText = `${tweets.length} توییت یافت شد.`;
-                tweets.forEach(t => { body.innerHTML += `<tr class="hover:bg-slate-800/50"><td class="p-3 whitespace-nowrap text-[10px] text-slate-500 text-right dir-ltr">${t.date}</td><td class="p-3 truncate max-w-md text-right dir-rtl" title="${t.text}">${t.text.substring(0,80)}...</td><td class="p-3"><a href="${t.url}" target="_blank" class="text-blue-500 hover:text-blue-400">لینک</a></td></tr>`; });
+                
+                tweets.forEach(t => {
+                    body.innerHTML += `
+                    <tr class="hover:bg-slate-800/50 border-b border-slate-800/50">
+                        <td class="p-3 whitespace-nowrap text-[10px] text-slate-500 text-right dir-ltr align-top">${t.date}</td>
+                        <td class="p-3 text-xs text-right dir-rtl text-slate-300 leading-6 align-top whitespace-pre-wrap">${t.text}</td>
+                        <td class="p-3 align-top"><a href="${t.url}" target="_blank" class="text-blue-500 hover:text-blue-400 text-xs">لینک</a></td>
+                    </tr>`;
+                });
             } catch(e) { status.className = "text-xs font-mono text-red-500"; status.innerText = "خطا در دریافت فایل."; }
         }
 
